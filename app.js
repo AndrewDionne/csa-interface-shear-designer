@@ -53,6 +53,8 @@ const DEFAULTS = {
 let lastResult = null;
 let selectedStationIndex = 0;
 let scrubDragActive = false;
+let designZones = [];
+let zoneIdCounter = 1;
 
 function $(id) {
   return document.getElementById(id);
@@ -97,12 +99,143 @@ function setupRebarSelects() {
   });
 }
 
+
+function rebarOptions(selected) {
+  return REBAR.map(r => `<option value="${r.size}" ${r.size === selected ? "selected" : ""}>${r.size} (${r.area} mm²)</option>`).join("");
+}
+
+function beamLengthFromCurrentInputs() {
+  const temp = {
+    beamSystem: val("beamSystem"),
+    L1: Math.max(0.1, num("L1")),
+    L2: Math.max(0.1, num("L2"))
+  };
+  return beamLength(temp);
+}
+
+function zoneFromBaseInputs(x1 = 0, x2 = null) {
+  const L = beamLengthFromCurrentInputs();
+  return {
+    id: zoneIdCounter++,
+    label: "Zone 1",
+    x1,
+    x2: x2 ?? L,
+    stirrupBar: val("stirrupBar") || DEFAULTS.stirrupBar,
+    stirrupLegs: num("stirrupLegs") || DEFAULTS.stirrupLegs,
+    stirrupSpacing: num("stirrupSpacing") || DEFAULTS.stirrupSpacing,
+    dowelBar: val("dowelBar") || DEFAULTS.dowelBar,
+    dowelLegs: num("dowelLegs"),
+    dowelSpacing: num("dowelSpacing") || DEFAULTS.dowelSpacing
+  };
+}
+
+function ensureDesignZones() {
+  const L = beamLengthFromCurrentInputs();
+  if (!designZones.length) {
+    designZones = [zoneFromBaseInputs(0, L)];
+  }
+  designZones[0] = { ...designZones[0], ...zoneFromBaseInputs(0, L), id: designZones[0].id || 1, label: "Zone 1" };
+  designZones = designZones.map((z, idx) => ({
+    ...z,
+    label: idx === 0 ? "Zone 1" : (z.label || `Zone ${idx + 1}`),
+    x1: clamp(Number.isFinite(+z.x1) ? +z.x1 : 0, 0, L),
+    x2: clamp(Number.isFinite(+z.x2) ? +z.x2 : L, 0, L),
+    stirrupBar: z.stirrupBar || val("stirrupBar") || DEFAULTS.stirrupBar,
+    stirrupLegs: Math.max(0, Math.round(+z.stirrupLegs || 0)),
+    stirrupSpacing: Math.max(25, +z.stirrupSpacing || DEFAULTS.stirrupSpacing),
+    dowelBar: z.dowelBar || val("dowelBar") || DEFAULTS.dowelBar,
+    dowelLegs: Math.max(0, Math.round(+z.dowelLegs || 0)),
+    dowelSpacing: Math.max(25, +z.dowelSpacing || DEFAULTS.dowelSpacing)
+  })).map(z => z.x2 < z.x1 ? { ...z, x2: z.x1 } : z);
+}
+
+function collectDesignZones(inputs) {
+  ensureDesignZones();
+  const L = beamLength(inputs);
+  const base = { ...designZones[0], x1: 0, x2: L, label: "Zone 1" };
+  const extras = inputs.zoneDesignMode === "uniform" ? [] : designZones.slice(1).map((z, idx) => ({
+    ...z,
+    label: z.label || `Zone ${idx + 2}`,
+    x1: clamp(+z.x1 || 0, 0, L),
+    x2: clamp(+z.x2 || 0, 0, L)
+  })).filter(z => z.x2 > z.x1 + 1e-9);
+  return [base, ...extras].map((z, idx) => ({ ...z, id: z.id || idx + 1, label: idx === 0 ? "Zone 1" : (z.label || `Zone ${idx + 1}`) }));
+}
+
+function renderZoneEditor() {
+  const el = $("zoneEditor");
+  if (!el) return;
+  ensureDesignZones();
+  const L = beamLengthFromCurrentInputs();
+  const rows = designZones.map((z, idx) => {
+    const isBase = idx === 0;
+    return `<div class="zone-card" data-zone-id="${z.id}">
+      <div class="zone-card-head">
+        <strong>${isBase ? "Zone 1 — base reinforcement" : z.label}</strong>
+        ${isBase ? `<span class="small-muted">Default full-span zone</span>` : `<button class="mini-button zone-delete" type="button" data-zone-id="${z.id}">×</button>`}
+      </div>
+      <div class="zone-card-grid">
+        <label>x start, m<input class="zone-input" data-zone-id="${z.id}" data-field="x1" type="number" min="0" max="${L}" step="0.05" value="${Number(z.x1 || 0).toFixed(3)}" ${isBase ? "readonly" : ""}></label>
+        <label>x end, m<input class="zone-input" data-zone-id="${z.id}" data-field="x2" type="number" min="0" max="${L}" step="0.05" value="${Number(z.x2 || 0).toFixed(3)}" ${isBase ? "readonly" : ""}></label>
+        ${isBase ? `<div class="zone-inherit-note">Zone 1 reinforcement is edited in the fields above.</div>` : `
+          <label>Primary bar<select class="zone-input" data-zone-id="${z.id}" data-field="stirrupBar">${rebarOptions(z.stirrupBar)}</select></label>
+          <label>Primary legs<input class="zone-input" data-zone-id="${z.id}" data-field="stirrupLegs" type="number" min="0" step="1" value="${Math.round(z.stirrupLegs || 0)}"></label>
+          <label>Primary spacing, mm<input class="zone-input" data-zone-id="${z.id}" data-field="stirrupSpacing" type="number" min="50" step="25" value="${Math.round(z.stirrupSpacing || 0)}"></label>
+          <label>Dowel bar<select class="zone-input" data-zone-id="${z.id}" data-field="dowelBar">${rebarOptions(z.dowelBar)}</select></label>
+          <label>Dowel legs<input class="zone-input" data-zone-id="${z.id}" data-field="dowelLegs" type="number" min="0" step="1" value="${Math.round(z.dowelLegs || 0)}"></label>
+          <label>Dowel spacing, mm<input class="zone-input" data-zone-id="${z.id}" data-field="dowelSpacing" type="number" min="50" step="25" value="${Math.round(z.dowelSpacing || 0)}"></label>`}
+      </div>
+    </div>`;
+  }).join("");
+  el.innerHTML = rows;
+}
+
+function addUserZone() {
+  ensureDesignZones();
+  const L = beamLengthFromCurrentInputs();
+  const n = designZones.length;
+  const width = Math.max(0.5, Math.min(2.0, L / 4));
+  const start = Math.max(0, Math.min(L - width, n * width));
+  const base = designZones[0] || zoneFromBaseInputs(0, L);
+  designZones.push({
+    ...base,
+    id: zoneIdCounter++,
+    label: `Zone ${designZones.length + 1}`,
+    x1: start,
+    x2: Math.min(L, start + width)
+  });
+  renderZoneEditor();
+  runCalculations();
+}
+
+function updateZoneFromEvent(el) {
+  const id = parseInt(el.dataset.zoneId, 10);
+  const field = el.dataset.field;
+  const zone = designZones.find(z => z.id === id);
+  if (!zone || !field) return;
+  if (["x1", "x2", "stirrupLegs", "stirrupSpacing", "dowelLegs", "dowelSpacing"].includes(field)) {
+    zone[field] = parseFloat(el.value) || 0;
+  } else {
+    zone[field] = el.value;
+  }
+  runCalculations();
+}
+
+function deleteZone(id) {
+  designZones = designZones.filter((z, idx) => idx === 0 || z.id !== id);
+  renderZoneEditor();
+  runCalculations();
+}
+
 function applyDefaults() {
   for (const [key, value] of Object.entries(DEFAULTS)) {
     if ($(key)) $(key).value = value;
   }
   syncInterfaceDefaults();
+  designZones = [];
+  ensureDesignZones();
   updateConditionalInputs();
+  renderZoneEditor();
 }
 
 function syncInterfaceDefaults() {
@@ -334,6 +467,7 @@ function collectInputs() {
   inputs.zoneMaxSpacing = Math.max(inputs.zoneMinSpacing, inputs.zoneMaxSpacing || 450);
   inputs.zoneMaxCount = Math.max(1, Math.min(9, inputs.zoneMaxCount || 5));
   inputs.zoneMinLength = Math.max(0, inputs.zoneMinLength || 0);
+  inputs.designZones = collectDesignZones(inputs);
   return inputs;
 }
 
@@ -565,10 +699,10 @@ function localDesignForStation(r, station) {
   return { beamAvReqPerM, interfaceAvReqPerM, unusedStirrupAv, addReq, totalAvailable, beamRatio, interfaceRatio, shearRatio, flexRatio, zone: stationZone(r, station) };
 }
 
-function localSpacingLimit(r, station) {
+function localSpacingLimit(r, station, detail = null) {
   const s = r.summary;
   const sqrtFc = Math.sqrt(Math.max(0, r.inputs.fc));
-  const primarySet = Math.max(0, s.stirrupAvSet);
+  const primarySet = detail ? Math.max(0, (+detail.stirrupLegs || 0) * rebar(detail.stirrupBar || r.inputs.stirrupBar).area) : Math.max(0, s.stirrupAvSet);
   const minSteelSpacingLimit = primarySet > 0 ? primarySet * Math.max(1, r.inputs.fy) / Math.max(1, 0.06 * sqrtFc * r.section.b) : 0;
   const sMaxLocal = Math.abs(station.V) > s.highShearThreshold ? Math.min(0.35 * r.section.dv, 300) : Math.min(0.7 * r.section.dv, 600);
   return { minSteelSpacingLimit, sMaxLocal };
@@ -584,12 +718,16 @@ function spacingOptions(minSpacing, maxSpacing) {
   return [...new Set(opts)].sort((a, b) => b - a);
 }
 
-function evaluateDetailAtStation(r, station, primarySpacing, dowelSpacing = null) {
+function evaluateDetailAtStation(r, station, primarySpacing, dowelSpacing = null, detail = null) {
   const s = r.summary;
   const i = r.inputs;
   const local = localDesignForStation(r, station);
-  const primarySet = Math.max(0, s.stirrupAvSet);
-  const dowelSet = Math.max(0, s.dowelAvSet);
+  const stirrupBar = detail?.stirrupBar || i.stirrupBar;
+  const stirrupLegs = detail?.stirrupLegs ?? i.stirrupLegs;
+  const dowelBar = detail?.dowelBar || i.dowelBar;
+  const dowelLegs = detail?.dowelLegs ?? i.dowelLegs;
+  const primarySet = Math.max(0, (+stirrupLegs || 0) * rebar(stirrupBar).area);
+  const dowelSet = Math.max(0, (+dowelLegs || 0) * rebar(dowelBar).area);
   const primaryPerM = primarySet > 0 && primarySpacing > 0 ? primarySet / primarySpacing * 1000 : 0;
   const Vs = i.phiS * (primarySet / Math.max(1, primarySpacing)) * i.fy * r.section.dv * s.cotTheta / 1000;
   const Vr = s.Vc + Vs;
@@ -602,11 +740,11 @@ function evaluateDetailAtStation(r, station, primarySpacing, dowelSpacing = null
   const interfaceResistance = Math.min(s.concreteLimit, interfaceResistanceRaw);
   const interfaceRatio = Math.abs(station.vInterface) / Math.max(1e-9, interfaceResistance);
   const shearRatio = beamRatio + interfaceRatio;
-  const spacingLimit = localSpacingLimit(r, station);
+  const spacingLimit = localSpacingLimit(r, station, { stirrupBar, stirrupLegs });
   const minSteelOk = primarySet >= 0.06 * Math.sqrt(Math.max(0, i.fc)) * r.section.b * primarySpacing / Math.max(1, i.fy);
   const spacingOk = primarySpacing <= spacingLimit.sMaxLocal + 1e-9;
   const ok = shearRatio <= 1.0 + 1e-9 && spacingOk && minSteelOk;
-  return { ...local, primarySpacing, primaryPerM, dowelSpacing, dowelPerM, totalInterfaceAvailable, interfaceResistance, beamRatio, interfaceRatio, shearRatio, Vs, Vr, spacingOk, minSteelOk, ok };
+  return { ...local, stirrupBar, stirrupLegs, dowelBar, dowelLegs, primarySpacing, primarySet, primaryPerM, dowelSpacing, dowelSet, dowelPerM, totalInterfaceAvailable, interfaceResistance, beamRatio, interfaceRatio, shearRatio, Vs, Vr, spacingOk, minSteelOk, ok };
 }
 
 function stationDesignRequirement(r, station) {
@@ -671,8 +809,13 @@ function governingDesignForRange(r, x1, x2) {
   }
   return gov;
 }
+
+function detailKeyFromZone(z) {
+  return [z.stirrupBar, Math.round(z.stirrupLegs || 0), Math.round(z.primarySpacing || z.stirrupSpacing || 0), z.dowelBar, Math.round(z.dowelLegs || 0), z.dowelSpacing ? Math.round(z.dowelSpacing) : 0, z.ok ? 1 : 0].join("|");
+}
+
 function segmentKey(seg) {
-  return `${Math.round(seg.primarySpacing || 0)}|${seg.dowelSpacing ? Math.round(seg.dowelSpacing) : 0}|${seg.ok ? 1 : 0}`;
+  return detailKeyFromZone(seg);
 }
 
 function zoneMinimumLength(r) {
@@ -681,9 +824,32 @@ function zoneMinimumLength(r) {
   return Math.max(userMin, twoD);
 }
 
-function recomputeSegment(r, x1, x2) {
-  const gov = governingDesignForRange(r, x1, x2);
-  return { x1, x2, gov, primarySpacing: gov.primarySpacing, dowelSpacing: gov.dowelSpacing, addReq: gov.addReq, ok: gov.ok };
+function evaluateExplicitZoneSegment(r, x1, x2, detail) {
+  const stations = r.stations.filter(st => st.x >= x1 - 1e-9 && st.x <= x2 + 1e-9);
+  const list = stations.length ? stations : [r.stations.reduce((best, st) => Math.abs(st.x - (x1 + x2)/2) < Math.abs(best.x - (x1 + x2)/2) ? st : best, r.stations[0])];
+  let gov = null;
+  for (const st of list) {
+    const ev = evaluateDetailAtStation(r, st, detail.stirrupSpacing, detail.dowelLegs > 0 ? detail.dowelSpacing : null, detail);
+    const trial = { ...ev, station: st };
+    if (!gov || trial.shearRatio > gov.shearRatio || (!trial.ok && gov.ok)) gov = trial;
+  }
+  const minLenOk = (x2 - x1) >= zoneMinimumLength(r) - 1e-9 || Math.abs((x2 - x1) - beamLength(r.inputs)) < 1e-9;
+  return {
+    x1,
+    x2,
+    minLenOk,
+    id: detail.id,
+    sourceLabel: detail.label,
+    gov,
+    stirrupBar: detail.stirrupBar,
+    stirrupLegs: detail.stirrupLegs,
+    primarySpacing: detail.stirrupSpacing,
+    dowelBar: detail.dowelBar,
+    dowelLegs: detail.dowelLegs,
+    dowelSpacing: detail.dowelLegs > 0 ? detail.dowelSpacing : null,
+    addReq: gov?.addReq || 0,
+    ok: Boolean(gov?.ok) && minLenOk
+  };
 }
 
 function mergeAdjacentSameDetail(segments) {
@@ -708,16 +874,32 @@ function consolidateScheduleRows(r, segments) {
     const key = segmentKey(seg);
     let row = rows.find(z => z.key === key);
     if (!row) {
-      row = { key, name: `Zone ${rows.length + 1}`, ranges: [], gov: seg.gov, primarySpacing: seg.primarySpacing, dowelSpacing: seg.dowelSpacing, addReq: seg.addReq || 0, ok: seg.ok, mode: r.inputs.zoneDesignMode === "uniform" ? "Uniform" : "Zoned demand envelope" };
+      row = {
+        key,
+        name: seg.sourceLabel || `Zone ${rows.length + 1}`,
+        ranges: [],
+        gov: seg.gov,
+        stirrupBar: seg.stirrupBar,
+        stirrupLegs: seg.stirrupLegs,
+        primarySpacing: seg.primarySpacing,
+        dowelBar: seg.dowelBar,
+        dowelLegs: seg.dowelLegs,
+        dowelSpacing: seg.dowelSpacing,
+        addReq: seg.addReq || 0,
+        minLenOk: seg.minLenOk !== false,
+        ok: seg.ok,
+        mode: r.inputs.zoneDesignMode === "uniform" ? "Uniform" : "Editable zones"
+      };
       rows.push(row);
     }
     row.ranges.push({ x1: seg.x1, x2: seg.x2 });
     if (seg.gov && (!row.gov || seg.gov.shearRatio > row.gov.shearRatio)) row.gov = seg.gov;
     row.addReq = Math.max(row.addReq || 0, seg.addReq || 0);
+    row.minLenOk = row.minLenOk && seg.minLenOk !== false;
     row.ok = row.ok && seg.ok;
   }
   rows.forEach((row, idx) => {
-    row.name = `Zone ${idx + 1}`;
+    if (!row.name) row.name = `Zone ${idx + 1}`;
     row.x1 = row.ranges[0].x1;
     row.x2 = row.ranges[row.ranges.length - 1].x2;
     row.length = row.ranges.reduce((sum, rg) => sum + Math.max(0, rg.x2 - rg.x1), 0);
@@ -728,85 +910,24 @@ function consolidateScheduleRows(r, segments) {
 function computeZoneSchedule(r) {
   const i = r.inputs;
   const L = beamLength(i);
-
-  if (i.zoneDesignMode === "uniform") {
-    const gov = governingDesignForRange(r, 0, L);
-    const actual = evaluateDetailAtStation(r, gov.station, i.stirrupSpacing, i.dowelLegs > 0 ? i.dowelSpacing : null);
-    return consolidateScheduleRows(r, [{ x1: 0, x2: L, gov: actual, primarySpacing: i.stirrupSpacing, dowelSpacing: i.dowelLegs > 0 ? i.dowelSpacing : null, addReq: actual.addReq || 0, ok: actual.ok }]);
-  }
-
-  const stationReqs = r.stations.map(st => ({ station: st, req: stationDesignRequirement(r, st) }));
+  const zones = (i.designZones && i.designZones.length ? i.designZones : [{
+    label: "Zone 1", x1: 0, x2: L, stirrupBar: i.stirrupBar, stirrupLegs: i.stirrupLegs, stirrupSpacing: i.stirrupSpacing, dowelBar: i.dowelBar, dowelLegs: i.dowelLegs, dowelSpacing: i.dowelSpacing
+  }]);
+  const base = { ...zones[0], x1: 0, x2: L, label: "Zone 1" };
+  const extras = i.zoneDesignMode === "uniform" ? [] : zones.slice(1).filter(z => z.x2 > z.x1 + 1e-9);
+  const bounds = new Set([0, L]);
+  extras.forEach(z => { bounds.add(clamp(z.x1, 0, L)); bounds.add(clamp(z.x2, 0, L)); });
+  const xs = [...bounds].sort((a, b) => a - b);
   let segments = [];
-  let start = stationReqs[0];
-  let currentKey = segmentKey(start.req);
-  for (let idx = 1; idx < stationReqs.length; idx++) {
-    const item = stationReqs[idx];
-    const key = segmentKey(item.req);
-    if (key !== currentKey) {
-      segments.push(recomputeSegment(r, start.station.x, stationReqs[idx - 1].station.x));
-      start = item;
-      currentKey = key;
-    }
+  for (let idx = 0; idx < xs.length - 1; idx++) {
+    const x1 = xs[idx], x2 = xs[idx + 1];
+    if (x2 <= x1 + 1e-9) continue;
+    const xm = (x1 + x2) / 2;
+    const override = [...extras].reverse().find(z => xm >= z.x1 - 1e-9 && xm <= z.x2 + 1e-9);
+    const detail = override || base;
+    segments.push(evaluateExplicitZoneSegment(r, x1, x2, detail));
   }
-  segments.push(recomputeSegment(r, start.station.x, stationReqs[stationReqs.length - 1].station.x));
   segments = mergeAdjacentSameDetail(segments);
-
-  const minLen = zoneMinimumLength(r);
-  let changed = true;
-  while (changed && segments.length > 1) {
-    changed = false;
-    for (let idx = 0; idx < segments.length; idx++) {
-      const len = segments[idx].x2 - segments[idx].x1;
-      if (len >= minLen - 1e-9) continue;
-      if (idx === 0) {
-        const newX = Math.min(L, segments[idx].x1 + minLen);
-        if (segments[idx + 1] && newX < segments[idx + 1].x2 - 1e-6) {
-          segments[idx] = recomputeSegment(r, segments[idx].x1, newX);
-          segments[idx + 1] = recomputeSegment(r, newX, segments[idx + 1].x2);
-          changed = true;
-          break;
-        }
-      } else if (idx === segments.length - 1) {
-        const newX = Math.max(0, segments[idx].x2 - minLen);
-        if (segments[idx - 1] && newX > segments[idx - 1].x1 + 1e-6) {
-          segments[idx - 1] = recomputeSegment(r, segments[idx - 1].x1, newX);
-          segments[idx] = recomputeSegment(r, newX, segments[idx].x2);
-          changed = true;
-          break;
-        }
-      }
-      const left = idx > 0 ? idx - 1 : null;
-      const right = idx < segments.length - 1 ? idx + 1 : null;
-      let mergeIdx = right;
-      if (left !== null && right !== null) {
-        const leftPenalty = Math.abs((segments[left].primarySpacing || 0) - (segments[idx].primarySpacing || 0));
-        const rightPenalty = Math.abs((segments[right].primarySpacing || 0) - (segments[idx].primarySpacing || 0));
-        mergeIdx = leftPenalty <= rightPenalty ? left : right;
-      } else if (left !== null) {
-        mergeIdx = left;
-      }
-      if (mergeIdx === null) break;
-      const a = Math.min(idx, mergeIdx);
-      const b = Math.max(idx, mergeIdx);
-      const combined = recomputeSegment(r, segments[a].x1, segments[b].x2);
-      segments.splice(a, 2, combined);
-      changed = true;
-      break;
-    }
-    segments = mergeAdjacentSameDetail(segments);
-  }
-
-  while (segments.length > i.zoneMaxCount) {
-    let best = 0;
-    let bestPenalty = Infinity;
-    for (let idx = 0; idx < segments.length - 1; idx++) {
-      const penalty = Math.abs((segments[idx].primarySpacing || 0) - (segments[idx + 1].primarySpacing || 0)) + Math.abs((segments[idx].dowelSpacing || 0) - (segments[idx + 1].dowelSpacing || 0));
-      if (penalty < bestPenalty) { bestPenalty = penalty; best = idx; }
-    }
-    segments.splice(best, 2, recomputeSegment(r, segments[best].x1, segments[best + 1].x2));
-    segments = mergeAdjacentSameDetail(segments);
-  }
-
   return consolidateScheduleRows(r, segments);
 }
 
@@ -821,7 +942,7 @@ function evaluateZoneScheduleUtilization(r) {
     for (const rg of ranges) {
       const stations = r.stations.filter(st => st.x >= rg.x1 - 1e-9 && st.x <= rg.x2 + 1e-9);
       for (const st of stations) {
-        const ev = evaluateDetailAtStation(r, st, z.primarySpacing, z.dowelSpacing || null);
+        const ev = evaluateDetailAtStation(r, st, z.primarySpacing, z.dowelSpacing || null, z);
         if (ev.shearRatio > maxCombined) {
           maxCombined = ev.shearRatio;
           maxBeam = ev.beamRatio;
@@ -851,7 +972,7 @@ function renderZoneSchedule(r) {
   const minLen = zoneMinimumLength(r);
   const rows = zones.map(z => {
     const ranges = (z.ranges || [{ x1: z.x1, x2: z.x2 }]).map(rg => `${fmt(rg.x1,2)}–${fmt(rg.x2,2)}`).join("; ");
-    const dowelText = z.dowelSpacing ? `${fmt(i.dowelLegs,0)} legs ${i.dowelBar} @ ${fmt(z.dowelSpacing,0)} mm` : (z.addReq > 1e-9 ? `Needs ${fmt(z.addReq,0)} mm²/m added interface steel` : "None");
+    const dowelText = z.dowelSpacing && z.dowelLegs > 0 ? `${fmt(z.dowelLegs,0)} legs ${z.dowelBar} @ ${fmt(z.dowelSpacing,0)} mm` : (z.addReq > 1e-9 ? `Needs ${fmt(z.addReq,0)} mm²/m added interface steel` : "None");
     const cls = z.ok ? "ok" : "ng";
     return `<tr class="${cls}">
       <td>${z.name}</td>
@@ -860,13 +981,13 @@ function renderZoneSchedule(r) {
       <td>${fmt(Math.abs(z.gov.station.V),0)}</td>
       <td>${fmt(Math.abs(z.gov.station.M),0)}</td>
       <td>${fmt(z.gov.interfaceAvReqPerM,0)}</td>
-      <td>${fmt(i.stirrupLegs,0)} legs ${i.stirrupBar} @ ${fmt(z.primarySpacing,0)} mm</td>
+      <td>${fmt(z.stirrupLegs,0)} legs ${z.stirrupBar} @ ${fmt(z.primarySpacing,0)} mm</td>
       <td>${dowelText}</td>
       <td>${fmt(z.gov.shearRatio,2)}</td>
       <td><span class="mini-status ${cls}">${z.ok ? "OK" : "NG"}</span></td>
     </tr>`;
   }).join("");
-  el.innerHTML = `<div class="zone-summary">Mode: <strong>${i.zoneDesignMode}</strong> · Strategy: <strong>${i.zoneDesignStrategy}</strong> · spacing range ${fmt(i.zoneMinSpacing,0)}–${fmt(i.zoneMaxSpacing,0)} mm · minimum zone length ${fmt(minLen,2)} m (≥2d)</div>
+  el.innerHTML = `<div class="zone-summary">Mode: <strong>${i.zoneDesignMode}</strong> · Strategy: <strong>${i.zoneDesignStrategy}</strong> · ${zones.length} editable schedule row${zones.length === 1 ? "" : "s"} · minimum zone length guide ${fmt(minLen,2)} m (≥2d)</div>
     <div class="table-wrap zone-table-wrap"><table class="zone-table">
       <thead><tr><th>Zone</th><th>x range, m</th><th>Total length, m</th><th>|Vf|, kN</th><th>|Mf|, kN·m</th><th>Interface req, mm²/m</th><th>Primary shear reinforcement</th><th>Added interface dowels</th><th>Shear util.</th><th>Status</th></tr></thead>
       <tbody>${rows}</tbody>
@@ -1046,7 +1167,7 @@ function buildShearZones(r, left, plotW, L, y) {
         const x1 = scaleX(rg.x1, L, left, plotW);
         const x2 = scaleX(rg.x2, L, left, plotW);
         const mid = (x1 + x2) / 2;
-        const label = `${seg.name}: ${fmt(seg.primarySpacing,0)} mm${seg.dowelSpacing ? ` + D@${fmt(seg.dowelSpacing,0)}` : ""}`;
+        const label = `${seg.name}: ${fmt(seg.stirrupLegs,0)}-${seg.stirrupBar} @ ${fmt(seg.primarySpacing,0)}${seg.dowelSpacing ? ` + ${fmt(seg.dowelLegs,0)}-${seg.dowelBar}@${fmt(seg.dowelSpacing,0)}` : ""}`;
         return `<line x1="${x1}" y1="${y}" x2="${x2}" y2="${y}" stroke="${color}" stroke-width="3.2"/>
                 <line x1="${x1}" y1="${y - 12}" x2="${x1}" y2="${y + 12}" stroke="${color}" stroke-width="2"/>
                 <line x1="${x2}" y1="${y - 8}" x2="${x2}" y2="${y + 8}" stroke="${color}" stroke-width="1.5" opacity="0.7"/>
@@ -1212,13 +1333,17 @@ function renderCrossSection(r) {
   const zone = st ? zoneForStation(r, st) : null;
   const zonePrimarySpacing = zone ? zone.primarySpacing : r.inputs.stirrupSpacing;
   const zoneDowelSpacing = zone && zone.dowelSpacing ? zone.dowelSpacing : r.inputs.dowelSpacing;
+  const zoneStirrupBar = zone ? zone.stirrupBar : r.inputs.stirrupBar;
+  const zoneStirrupLegs = zone ? zone.stirrupLegs : r.inputs.stirrupLegs;
+  const zoneDowelBar = zone ? zone.dowelBar : r.inputs.dowelBar;
+  const zoneDowelLegs = zone ? zone.dowelLegs : r.inputs.dowelLegs;
   const scale = Math.min(maxW / Math.max(1, r.inputs.b), maxH / Math.max(1, r.inputs.h));
   const secW = r.inputs.b * scale;
   const secH = r.inputs.h * scale;
   const slabH = r.section.slabDepth * scale;
   const main = rebar(r.inputs.mainBar);
-  const stirrup = rebar(r.inputs.stirrupBar);
-  const dowel = rebar(r.inputs.dowelBar);
+  const stirrup = rebar(zoneStirrupBar);
+  const dowel = rebar(zoneDowelBar);
   const mainR = Math.max(2.0, (main.diameter * scale) / 2);
   const stirrupW = Math.max(1.5, stirrup.diameter * scale);
   const dowelW = Math.max(1.5, dowel.diameter * scale);
@@ -1246,7 +1371,7 @@ function renderCrossSection(r) {
   }
   const bars = rowBars(topCount, topYBars) + rowBars(bottomCount, bottomYBars);
 
-  const stirrupLegs = Math.max(0, Math.round(r.inputs.stirrupLegs));
+  const stirrupLegs = Math.max(0, Math.round(zoneStirrupLegs));
   let legs = "";
   const nLegs = Math.min(24, stirrupLegs);
   for (let i = 0; i < nLegs; i++) {
@@ -1254,7 +1379,7 @@ function renderCrossSection(r) {
     legs += `<line x1="${lx}" y1="${innerY0}" x2="${lx}" y2="${innerY1}" stroke="#2a5caa" stroke-width="${stirrupW}" opacity="0.82"/>`;
   }
 
-  const dowelLegs = Math.max(0, Math.round(r.inputs.dowelLegs));
+  const dowelLegs = Math.max(0, Math.round(zoneDowelLegs));
   let dowels = "";
   const nDowels = Math.min(16, dowelLegs);
   for (let i = 0; i < nDowels; i++) {
@@ -1285,8 +1410,8 @@ function renderCrossSection(r) {
     <line x1="${x0 - 26}" y1="${y0 + secH}" x2="${x0 - 14}" y2="${y0 + secH}" stroke="#8091a5"/>
     <text x="${x0 - 30}" y="${y0 + secH/2}" transform="rotate(-90 ${x0 - 30} ${y0 + secH/2})" font-size="10.5" text-anchor="middle">h</text>
     <text x="${x0}" y="${noteY}" font-size="12" fill="#2d3b4d"><tspan font-weight="800">Second slab:</tspan> t=${fmt(r.inputs.slabDepth,0)} mm · <tspan fill="#6b4600" font-weight="800">roughened interface</tspan></text>
-    <text x="${x0}" y="${noteY + 21}" font-size="12" fill="#2a5caa">Primary: ${fmt(r.inputs.stirrupLegs,0)} legs ${r.inputs.stirrupBar} @ ${fmt(zonePrimarySpacing,0)} mm${zone ? ` (${zone.name})` : ``}</text>
-    <text x="${x0}" y="${noteY + 42}" font-size="12" fill="#b3261e">Add: ${r.inputs.dowelLegs > 0 && zoneDowelSpacing ? `${fmt(r.inputs.dowelLegs,0)} legs ${r.inputs.dowelBar} @ ${fmt(zoneDowelSpacing,0)} mm` : `None`}</text>
+    <text x="${x0}" y="${noteY + 21}" font-size="12" fill="#2a5caa">Primary: ${fmt(zoneStirrupLegs,0)} legs ${zoneStirrupBar} @ ${fmt(zonePrimarySpacing,0)} mm${zone ? ` (${zone.name})` : ``}</text>
+    <text x="${x0}" y="${noteY + 42}" font-size="12" fill="#b3261e">Add: ${zoneDowelLegs > 0 && zoneDowelSpacing ? `${fmt(zoneDowelLegs,0)} legs ${zoneDowelBar} @ ${fmt(zoneDowelSpacing,0)} mm` : `None`}</text>
     <text x="${x0}" y="${noteY + 63}" font-size="12" fill="#1f2937">Bottom: ${fmt(r.inputs.mainCount,0)}-${r.inputs.mainBar}; shown in ${rows} row${rows>1?'s':''}</text>
     <text x="${x0}" y="${noteY + 84}" font-size="11" fill="#667587">${localLine}</text>
   </svg>`;
@@ -1402,38 +1527,60 @@ function rangeText(ranges) {
 function sectionGeometryFigure(r) {
   const i = r.inputs;
   const sec = r.section;
-  const w = 470, h = 250;
-  const x0 = 80, y0 = 36, bw = 220, bh = 150;
-  const slabH = Math.max(18, bh * (sec.slabDepth / Math.max(1, i.h)));
-  const naY = y0 + bh / 2;
-  const slabCy = y0 + slabH / 2;
-  const qx = x0 + bw + 85;
-  const qy = y0 + slabCy + (naY - slabCy) / 2;
-  return `<svg viewBox="0 0 ${w} ${h}" role="img" aria-label="Section geometry sketch for interface shear calculations">
-    <rect x="${x0}" y="${y0}" width="${bw}" height="${slabH}" fill="#dce9f8" stroke="#49617c"/>
-    <rect x="${x0}" y="${y0 + slabH}" width="${bw}" height="${bh - slabH}" fill="#edf2f7" stroke="#49617c"/>
-    <line x1="${x0}" y1="${y0 + slabH}" x2="${x0 + bw}" y2="${y0 + slabH}" stroke="#b26a00" stroke-width="2.2" stroke-dasharray="7 5"/>
-    <line x1="${x0 - 28}" y1="${y0}" x2="${x0 - 28}" y2="${y0 + bh}" stroke="#8091a5"/>
-    <line x1="${x0 - 35}" y1="${y0}" x2="${x0 - 21}" y2="${y0}" stroke="#8091a5"/>
-    <line x1="${x0 - 35}" y1="${y0 + bh}" x2="${x0 - 21}" y2="${y0 + bh}" stroke="#8091a5"/>
-    <text x="${x0 - 42}" y="${y0 + bh/2}" transform="rotate(-90 ${x0 - 42} ${y0 + bh/2})" font-size="12" text-anchor="middle">h</text>
-    <line x1="${x0}" y1="${y0 - 18}" x2="${x0 + bw}" y2="${y0 - 18}" stroke="#8091a5"/>
-    <line x1="${x0}" y1="${y0 - 24}" x2="${x0}" y2="${y0 - 12}" stroke="#8091a5"/>
-    <line x1="${x0 + bw}" y1="${y0 - 24}" x2="${x0 + bw}" y2="${y0 - 12}" stroke="#8091a5"/>
-    <text x="${x0 + bw/2}" y="${y0 - 22}" font-size="12" text-anchor="middle">b</text>
-    <line x1="${x0 + bw + 15}" y1="${y0}" x2="${x0 + bw + 15}" y2="${y0 + slabH}" stroke="#8091a5"/>
-    <line x1="${x0 + bw + 9}" y1="${y0}" x2="${x0 + bw + 21}" y2="${y0}" stroke="#8091a5"/>
-    <line x1="${x0 + bw + 9}" y1="${y0 + slabH}" x2="${x0 + bw + 21}" y2="${y0 + slabH}" stroke="#8091a5"/>
-    <text x="${x0 + bw + 28}" y="${y0 + slabH/2}" font-size="12">t</text>
-    <line x1="${x0 - 8}" y1="${naY}" x2="${x0 + bw + 8}" y2="${naY}" stroke="#9b1c1c" stroke-dasharray="4 4"/>
-    <text x="${x0 + bw + 12}" y="${naY - 4}" font-size="11" fill="#9b1c1c">NA at ȳ = h/2</text>
-    <rect x="${x0 + 16}" y="${y0 + 10}" width="${bw - 32}" height="${slabH - 20}" fill="rgba(178,106,0,0.12)" stroke="#b26a00"/>
-    <text x="${x0 + 24}" y="${y0 + 26}" font-size="11" fill="#6b4600">A_slab = b·t</text>
-    <line x1="${x0 + bw/2}" y1="${slabCy}" x2="${x0 + bw/2}" y2="${naY}" stroke="#5c6f82" marker-end="url(#arrowTiny)"/>
-    <text x="${x0 + bw/2 + 8}" y="${qy}" font-size="11">Q = A_slab(ȳ − t/2)</text>
-    <line x1="${qx}" y1="${y0 + slabH}" x2="${qx+60}" y2="${y0 + slabH}" stroke="#b26a00" stroke-width="2.2" marker-end="url(#arrowTiny)"/>
-    <text x="${qx+66}" y="${y0 + slabH + 4}" font-size="11">q along cold joint</text>
-    <defs><marker id="arrowTiny" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#5c6f82"/></marker></defs>
+  const W = 640, H = 290;
+  const x = 110, y = 40, bw = 290, bh = 180;
+  const slabH = Math.max(28, bh * (sec.slabDepth / Math.max(1, i.h)));
+  const jointY = y + slabH;
+  const naY = y + bh / 2;
+  const slabCy = y + slabH / 2;
+  const dimColor = '#7b8ba1';
+  const steelBlue = '#4f83c2';
+  const outline = '#49617c';
+  const accent = '#b26a00';
+  const red = '#a12b2b';
+  const qx1 = 515, qx2 = 595;
+  return `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Section geometry sketch for interface shear calculations">
+    <defs>
+      <marker id="arrowGrey" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+        <path d="M0,0 L8,4 L0,8 Z" fill="#66788f"/>
+      </marker>
+      <marker id="arrowBrown2" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+        <path d="M0,0 L8,4 L0,8 Z" fill="${accent}"/>
+      </marker>
+    </defs>
+
+    <rect x="${x}" y="${y}" width="${bw}" height="${bh}" fill="#edf2f7" stroke="${outline}" stroke-width="2"/>
+    <rect x="${x}" y="${y}" width="${bw}" height="${slabH}" fill="#dfe9f5" stroke="none"/>
+    <rect x="${x+24}" y="${y+14}" width="${bw-48}" height="${Math.max(18, slabH-26)}" fill="rgba(255,255,255,0.30)" stroke="${accent}" stroke-width="1.6"/>
+
+    <line x1="${x}" y1="${jointY}" x2="${x+bw}" y2="${jointY}" stroke="${accent}" stroke-width="2.4" stroke-dasharray="8 6"/>
+    <text x="${x+10}" y="${jointY-8}" font-size="13" fill="#6a4700" font-weight="600">cold joint / interface</text>
+
+    <line x1="${x-38}" y1="${y}" x2="${x-38}" y2="${y+bh}" stroke="${dimColor}" stroke-width="1.5"/>
+    <line x1="${x-48}" y1="${y}" x2="${x-28}" y2="${y}" stroke="${dimColor}" stroke-width="1.5"/>
+    <line x1="${x-48}" y1="${y+bh}" x2="${x-28}" y2="${y+bh}" stroke="${dimColor}" stroke-width="1.5"/>
+    <text x="${x-60}" y="${y + bh/2}" transform="rotate(-90 ${x-60} ${y + bh/2})" font-size="18" fill="#22313f" text-anchor="middle">h</text>
+
+    <line x1="${x}" y1="${y-28}" x2="${x+bw}" y2="${y-28}" stroke="${dimColor}" stroke-width="1.5"/>
+    <line x1="${x}" y1="${y-37}" x2="${x}" y2="${y-19}" stroke="${dimColor}" stroke-width="1.5"/>
+    <line x1="${x+bw}" y1="${y-37}" x2="${x+bw}" y2="${y-19}" stroke="${dimColor}" stroke-width="1.5"/>
+    <text x="${x+bw/2}" y="${y-34}" font-size="18" fill="#22313f" text-anchor="middle">b</text>
+
+    <line x1="${x+bw+24}" y1="${y}" x2="${x+bw+24}" y2="${jointY}" stroke="${dimColor}" stroke-width="1.5"/>
+    <line x1="${x+bw+14}" y1="${y}" x2="${x+bw+34}" y2="${y}" stroke="${dimColor}" stroke-width="1.5"/>
+    <line x1="${x+bw+14}" y1="${jointY}" x2="${x+bw+34}" y2="${jointY}" stroke="${dimColor}" stroke-width="1.5"/>
+    <text x="${x+bw+42}" y="${y + slabH/2 + 6}" font-size="18" fill="#22313f">t</text>
+
+    <line x1="${x-16}" y1="${naY}" x2="${x+bw+8}" y2="${naY}" stroke="${red}" stroke-width="1.7" stroke-dasharray="6 5"/>
+    <text x="${x+bw+18}" y="${naY-4}" font-size="16" fill="${red}">NA at ȳ = h/2</text>
+
+    <text x="${x+34}" y="${y+34}" font-size="18" fill="#6a4700">A<tspan baseline-shift="sub" font-size="12">slab</tspan> = b·t</text>
+
+    <line x1="${x+bw/2}" y1="${slabCy+2}" x2="${x+bw/2}" y2="${naY-4}" stroke="#66788f" stroke-width="1.8" marker-end="url(#arrowGrey)"/>
+    <text x="${x+bw/2 + 12}" y="${(slabCy + naY)/2 + 6}" font-size="18" fill="#22313f">Q = A<tspan baseline-shift="sub" font-size="12">slab</tspan>(ȳ − t/2)</text>
+
+    <line x1="${qx1}" y1="${jointY}" x2="${qx2}" y2="${jointY}" stroke="${accent}" stroke-width="3" marker-end="url(#arrowBrown2)"/>
+    <text x="${qx2+8}" y="${jointY+6}" font-size="18" fill="#22313f">q along interface</text>
   </svg>`;
 }
 
@@ -1521,12 +1668,12 @@ function buildCalculationReportSections(r) {
 
   const zoneRows = (s.zoneSchedule || []).map(z => {
     const ev = z.gov || {};
-    const zDowel = z.dowelSpacing ? `${fmt(i.dowelLegs,0)} legs ${i.dowelBar} @ ${fmt(z.dowelSpacing,0)} mm` : "None";
+    const zDowel = z.dowelSpacing && z.dowelLegs > 0 ? `${fmt(z.dowelLegs,0)} legs ${z.dowelBar} @ ${fmt(z.dowelSpacing,0)} mm` : "None";
     return [
       z.name,
       rangeText(z.ranges || [{ x1: z.x1, x2: z.x2 }]),
       `${fmt(z.length,2)} m`,
-      `${fmt(i.stirrupLegs,0)} legs ${i.stirrupBar} @ ${fmt(z.primarySpacing,0)} mm`,
+      `${fmt(z.stirrupLegs,0)} legs ${z.stirrupBar} @ ${fmt(z.primarySpacing,0)} mm`,
       zDowel,
       `${fmt(Math.abs(ev.station?.V ?? 0),1)} kN`,
       `${fmt(ev.shearRatio ?? 0,3)}`,
@@ -1537,10 +1684,10 @@ function buildCalculationReportSections(r) {
   const zoneCalcRows = (s.zoneSchedule || []).map(z => {
     const ev = z.gov || {};
     const rg = z.ranges || [{ x1: z.x1, x2: z.x2 }];
-    const avPrimary = s.stirrupAvSet / Math.max(1, z.primarySpacing) * 1000;
+    const avPrimary = (z.stirrupLegs || 0) * rebar(z.stirrupBar).area / Math.max(1, z.primarySpacing) * 1000;
     const beamReq = ev.beamAvReqPerM ?? 0;
     const unused = i.allocation === "balance" ? Math.max(0, avPrimary - beamReq) : avPrimary;
-    const dowelPerM = z.dowelSpacing ? s.dowelAvSet / Math.max(1, z.dowelSpacing) * 1000 : 0;
+    const dowelPerM = z.dowelSpacing && z.dowelLegs > 0 ? (z.dowelLegs || 0) * rebar(z.dowelBar).area / Math.max(1, z.dowelSpacing) * 1000 : 0;
     const available = unused + dowelPerM;
     const addReq = Math.max(0, (ev.interfaceAvReqPerM ?? 0) - unused);
     return [
@@ -1558,7 +1705,7 @@ function buildCalculationReportSections(r) {
 
   return [
     {
-      title: "1. Calculation set, inputs, and variable key",
+      title: "1. Calculation set and inputs",
       blocks: [
         reportText("<strong>What this calculation set does:</strong> starting from the selected beam system and factored loads, the app determines the governing beam actions, converts those actions into cold-joint interface demand, checks vertical beam shear and interface shear-transfer resistance, then develops a practical shear-zone schedule."),
         reportText("<strong>Calculation sequence:</strong> (1) define inputs and section geometry, (2) solve beam actions and interface demand, (3) check flexural reasonableness, (4) check vertical beam shear, spacing, and minimum steel, (5) check interface shear-transfer, (6) allocate crossing steel and determine added dowels if required, and (7) generate a consolidated zone schedule."),
@@ -1571,9 +1718,7 @@ function buildCalculationReportSections(r) {
           ["Reinforcement basis", `Bottom steel ${fmt(i.mainCount,0)}-${i.mainBar}; primary shear ${fmt(i.stirrupLegs,0)} legs ${i.stirrupBar}; additional dowel/hairpin ${fmt(i.dowelLegs,0)} legs ${i.dowelBar}`],
           ["Zone rules", `${i.zoneDesignMode}; spacing range ${fmt(i.zoneMinSpacing,0)}–${fmt(i.zoneMaxSpacing,0)} mm; minimum zone length = max(user input, 2d) = ${fmt(minLen,2)} m`]
         ]),
-        reportText("<strong>Variable key:</strong> b = beam/interface width; h = total depth including second-placement slab; t = slab depth above the cold joint; I_g = gross second moment of area; ȳ = neutral-axis depth from top; A_slab = slab area above interface; Q = first moment of slab area about the neutral axis; d = effective depth to bottom steel; d_v = effective shear depth; z = flexural lever arm used for the cracked interface-demand check."),
-        reportText("Additional force variables: V_f = factored vertical shear; M_f = factored bending moment; q = interface shear flow in kN/m; v = interface shear stress in MPa; V_c = concrete shear contribution; V_s = stirrup shear contribution; V_r = total vertical shear resistance; ρ_v = ratio of reinforcement crossing the interface; A_v/s = crossing steel area per unit length."),
-        reportNote("Every variable used in the formulas below is either defined in the text, shown in the variable-key list, or labeled in the accompanying sketches.")
+        reportNote("Variables are introduced and defined in the calculation steps where they are first used.")
       ]
     },
     {
@@ -1614,7 +1759,6 @@ function buildCalculationReportSections(r) {
       title: "3. Find the beam actions and convert them to cold-joint demand",
       blocks: [
         reportText("<strong>Purpose of this step:</strong> solve the beam for the factored shear and moment envelopes, then convert the governing vertical shear into horizontal shear flow demand on the cold joint. The beam solver determines V_f and M_f along the span; the interface-demand model then converts V_f into q and v."),
-        reportFigure(demandFigure(r), "Beam-action sketch showing the factored distributed load, support reactions, and the demand quantities used by the report: M_f, V_f, q, and v=q/b."),
         reportTable(["Variable", "Meaning", "Governing value"], [
           ["V_f", "factored beam shear", `${fmt(s.maxV,2)} kN at x≈${fmt(govV.x,3)} m`],
           ["M_f", "factored bending moment", `${fmt(s.maxMabs,2)} kN·m at x≈${fmt(govM.x,3)} m`],
@@ -1661,7 +1805,6 @@ function buildCalculationReportSections(r) {
       title: "5. Check vertical beam shear strength",
       blocks: [
         reportText("<strong>Purpose of this step:</strong> verify that the selected stirrup arrangement provides sufficient vertical beam shear resistance. In this simplified CSA-style procedure, the concrete provides V_c, the stirrups provide V_s, and the total vertical resistance is V_r = V_c + V_s."),
-        reportFigure(shearTrussFigure(r), "Simplified truss-analogy sketch: diagonal concrete compression field at angle θ plus vertical stirrups providing V_s."),
         reportTable(["Variable", "Meaning", "Current value"], [
           ["β", "simplified cracked-concrete factor", `${fmt(s.beta,3)}`],
           ["θ", "compression-field angle", `${fmt(s.thetaDeg,1)}°`],
@@ -1709,7 +1852,6 @@ function buildCalculationReportSections(r) {
       title: "7. Find the cold-joint interface shear-transfer reinforcement required",
       blocks: [
         reportText("<strong>Purpose of this step:</strong> determine how much reinforcement must cross the cold joint so the interface can transfer the required horizontal shear flow. The selected interface condition provides the cohesion c and friction coefficient μ, and the crossing steel ratio ρ_v provides the clamping force."),
-        reportFigure(interfaceFrictionFigure(r), "Interface shear-friction sketch showing the roughened cold joint, crossing reinforcement, and the demand q resisted by friction and cohesion."),
         reportTable(["Variable", "Meaning", "Current value"], [
           ["c", "cohesion factor for the selected interface condition", `${fmt(i.cohesion,2)} MPa`],
           ["μ", "friction coefficient for the selected interface condition", `${fmt(i.mu,2)}`],
@@ -1890,6 +2032,71 @@ function niceSpacing(limit) {
   return options.find(v => v <= positive) || 75;
 }
 
+
+function buildAutoZones(sim, concept) {
+  const L = beamLength(sim.inputs);
+  const base = sim.inputs.designZones?.[0] || {
+    label: "Zone 1", x1: 0, x2: L, stirrupBar: sim.inputs.stirrupBar, stirrupLegs: sim.inputs.stirrupLegs, stirrupSpacing: sim.inputs.stirrupSpacing, dowelBar: sim.inputs.dowelBar, dowelLegs: sim.inputs.dowelLegs, dowelSpacing: sim.inputs.dowelSpacing
+  };
+  if (concept === "uniform") {
+    const gov = governingDesignForRange(sim, 0, L);
+    return [{ ...base, id: zoneIdCounter++, label: "Zone 1", x1: 0, x2: L, stirrupSpacing: gov.primarySpacing, dowelLegs: gov.dowelSpacing ? (base.dowelLegs || sim.inputs.dowelLegs || 4) : 0, dowelSpacing: gov.dowelSpacing || base.dowelSpacing }];
+  }
+
+  const reqs = sim.stations.map(st => ({ station: st, req: stationDesignRequirement(sim, st) }));
+  let pieces = [];
+  let startItem = reqs[0];
+  let currentKey = `${startItem.req.primarySpacing}|${startItem.req.dowelSpacing || 0}|${startItem.req.ok ? 1 : 0}`;
+  for (let idx = 1; idx < reqs.length; idx++) {
+    const key = `${reqs[idx].req.primarySpacing}|${reqs[idx].req.dowelSpacing || 0}|${reqs[idx].req.ok ? 1 : 0}`;
+    if (key !== currentKey) {
+      pieces.push({ x1: startItem.station.x, x2: reqs[idx - 1].station.x, req: startItem.req });
+      startItem = reqs[idx];
+      currentKey = key;
+    }
+  }
+  pieces.push({ x1: startItem.station.x, x2: reqs[reqs.length - 1].station.x, req: startItem.req });
+
+  const minLen = zoneMinimumLength(sim);
+  pieces = pieces.filter(p => p.x2 > p.x1 + 1e-9);
+  let changed = true;
+  while (changed && pieces.length > 1) {
+    changed = false;
+    for (let idx = 0; idx < pieces.length; idx++) {
+      if (pieces[idx].x2 - pieces[idx].x1 >= minLen - 1e-9) continue;
+      const mergeWith = idx === 0 ? 1 : idx === pieces.length - 1 ? idx - 1 : ((pieces[idx-1].x2 - pieces[idx-1].x1) <= (pieces[idx+1].x2 - pieces[idx+1].x1) ? idx - 1 : idx + 1);
+      const a = Math.min(idx, mergeWith), b = Math.max(idx, mergeWith);
+      const x1 = pieces[a].x1, x2 = pieces[b].x2;
+      const gov = governingDesignForRange(sim, x1, x2);
+      pieces.splice(a, 2, { x1, x2, req: gov });
+      changed = true;
+      break;
+    }
+  }
+  while (pieces.length > sim.inputs.zoneMaxCount) {
+    let best = 0, penalty = Infinity;
+    for (let idx = 0; idx < pieces.length - 1; idx++) {
+      const p = Math.abs((pieces[idx].req.primarySpacing || 0) - (pieces[idx+1].req.primarySpacing || 0)) + Math.abs((pieces[idx].req.dowelSpacing || 0) - (pieces[idx+1].req.dowelSpacing || 0));
+      if (p < penalty) { penalty = p; best = idx; }
+    }
+    const x1 = pieces[best].x1, x2 = pieces[best+1].x2;
+    const gov = governingDesignForRange(sim, x1, x2);
+    pieces.splice(best, 2, { x1, x2, req: gov });
+  }
+  const zones = pieces.map((p, idx) => ({
+    ...base,
+    id: zoneIdCounter++,
+    label: `Zone ${idx + 1}`,
+    x1: p.x1,
+    x2: p.x2,
+    stirrupSpacing: p.req.primarySpacing,
+    dowelLegs: p.req.dowelSpacing ? (base.dowelLegs || sim.inputs.dowelLegs || 4) : 0,
+    dowelSpacing: p.req.dowelSpacing || base.dowelSpacing
+  }));
+  if (zones.length) zones[0].label = "Zone 1";
+  return zones.length ? zones : [{ ...base, id: zoneIdCounter++, label: "Zone 1", x1: 0, x2: L }];
+}
+
 function previewAutoDesign(apply = false) {
   if (!lastResult) runCalculations();
   const r = lastResult;
@@ -1912,15 +2119,17 @@ function previewAutoDesign(apply = false) {
   const dowel = rebar(sim.inputs.dowelBar);
   sim.summary.dowelAvSet = sim.inputs.dowelLegs * dowel.area;
   sim.summary.dowelAvPerM = sim.inputs.dowelSpacing > 0 ? sim.summary.dowelAvSet / sim.inputs.dowelSpacing * 1000 : 0;
+  const proposedZones = buildAutoZones(sim, concept);
+  sim.inputs.designZones = proposedZones;
   sim.summary.zoneSchedule = computeZoneSchedule(sim);
   Object.assign(sim.summary, evaluateZoneScheduleUtilization(sim));
 
   const zones = sim.summary.zoneSchedule || [];
   const minPrimary = zones.length ? Math.min(...zones.map(z => z.primarySpacing || sim.inputs.stirrupSpacing)) : sim.inputs.stirrupSpacing;
-  const needsDowels = zones.some(z => z.dowelSpacing);
+  const needsDowels = zones.some(z => z.dowelSpacing && z.dowelLegs > 0);
   const maxUtil = sim.summary.zoneCombinedShearRatio;
   const zoneText = concept === "uniform" ? "uniform" : "zoned";
-  const message = `${zoneText} proposal: ${fmt(sim.inputs.stirrupLegs,0)} legs ${sim.inputs.stirrupBar}; tightest primary spacing ${fmt(minPrimary,0)} mm; ${needsDowels ? `added ${fmt(sim.inputs.dowelLegs,0)} legs ${sim.inputs.dowelBar} where required` : "no added dowels required"}. Max shear utilization ${fmt(maxUtil,2)}.`;
+  const message = `${zoneText} proposal: ${zones.length} editable zone${zones.length === 1 ? "" : "s"}; tightest primary spacing ${fmt(minPrimary,0)} mm; ${needsDowels ? "added dowels where required" : "no added dowels required"}. Max shear utilization ${fmt(maxUtil,2)}.`;
 
   if ($("autoDesignResult")) $("autoDesignResult").textContent = message;
 
@@ -1928,15 +2137,18 @@ function previewAutoDesign(apply = false) {
     $("zoneDesignMode").value = sim.inputs.zoneDesignMode;
     $("zoneDesignStrategy").value = sim.inputs.zoneDesignStrategy;
     $("zoneMaxSpacing").value = maxPractical;
-    $("stirrupSpacing").value = minPrimary;
-    if (needsDowels && sim.inputs.dowelLegs > 0) {
-      $("dowelLegs").value = sim.inputs.dowelLegs;
-      const firstDowelZone = zones.find(z => z.dowelSpacing);
-      if (firstDowelZone) $("dowelSpacing").value = firstDowelZone.dowelSpacing;
-    } else {
-      $("dowelLegs").value = 0;
+    designZones = proposedZones.map((z, idx) => ({ ...z, id: z.id || zoneIdCounter++, label: idx === 0 ? "Zone 1" : `Zone ${idx + 1}` }));
+    const z1 = designZones[0];
+    if (z1) {
+      $("stirrupBar").value = z1.stirrupBar;
+      $("stirrupLegs").value = z1.stirrupLegs;
+      $("stirrupSpacing").value = z1.stirrupSpacing;
+      $("dowelBar").value = z1.dowelBar;
+      $("dowelLegs").value = z1.dowelLegs;
+      $("dowelSpacing").value = z1.dowelSpacing;
     }
     updateConditionalInputs();
+    renderZoneEditor();
     runCalculations();
     if ($("autoDesignResult")) $("autoDesignResult").textContent = "Applied: " + message;
   }
@@ -1986,12 +2198,30 @@ function attachEvents() {
     el.addEventListener("change", () => {
       if (el.id === "interfaceCondition") syncInterfaceDefaults();
       updateConditionalInputs();
+      if (["beamSystem","L1","L2","stirrupBar","stirrupLegs","stirrupSpacing","dowelBar","dowelLegs","dowelSpacing"].includes(el.id)) renderZoneEditor();
       runCalculations();
     });
     el.addEventListener("input", () => {
-      if (el.type === "number") { updateConditionalInputs(); runCalculations(); }
+      if (el.type === "number") {
+        updateConditionalInputs();
+        if (["L1","L2","stirrupLegs","stirrupSpacing","dowelLegs","dowelSpacing"].includes(el.id)) renderZoneEditor();
+        runCalculations();
+      }
     });
   });
+  if ($("addZoneButton")) $("addZoneButton").addEventListener("click", addUserZone);
+  if ($("zoneEditor")) {
+    $("zoneEditor").addEventListener("input", event => {
+      if (event.target.classList.contains("zone-input")) updateZoneFromEvent(event.target);
+    });
+    $("zoneEditor").addEventListener("change", event => {
+      if (event.target.classList.contains("zone-input")) updateZoneFromEvent(event.target);
+      if (event.target.classList.contains("zone-delete")) deleteZone(parseInt(event.target.dataset.zoneId, 10));
+    });
+    $("zoneEditor").addEventListener("click", event => {
+      if (event.target.classList.contains("zone-delete")) deleteZone(parseInt(event.target.dataset.zoneId, 10));
+    });
+  }
   $("runButton").addEventListener("click", runCalculations);
   $("resetDefaults").addEventListener("click", () => { applyDefaults(); runCalculations(); });
   $("downloadCsv").addEventListener("click", downloadCsv);

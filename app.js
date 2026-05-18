@@ -326,7 +326,7 @@ function computeStationResults(inputs, section, fe) {
     // Include fixed-end support moments when present, chiefly for cantilever.
     fe.supportMoments.forEach(r => {
       if (x + 1e-9 >= r.x) {
-        M += r.moment;
+        M -= r.moment;
       }
     });
 
@@ -382,7 +382,7 @@ function runCalculations() {
   const sqrtFc = Math.sqrt(Math.max(0, inputs.fc));
 
   const Vc = inputs.phiC * inputs.lambda * beta * sqrtFc * section.b * section.dv / 1000; // kN
-  const beamAvReqPerM = Math.max(0, (maxV - Vc) * 1e6 / (inputs.phiS * inputs.fy * section.dv * cotTheta)); // mm²/mm? check: numerator N, denom N/mm²*mm = N/mm, result mm². Actually Av/s in mm²/mm.
+  const beamAvReqPerM = Math.max(0, (maxV - Vc) * 1000 / (inputs.phiS * inputs.fy * section.dv * cotTheta)); // mm²/mm
   const beamAvReqPerM2 = beamAvReqPerM * 1000; // mm²/m
 
   const highShearThreshold = 0.125 * inputs.lambda * inputs.phiC * sqrtFc * section.b * section.dv / 1000;
@@ -563,11 +563,10 @@ function labelBeamSystem(system) {
 }
 
 function renderCrossSection(r) {
-  const w = 620, hSvg = 420;
-  const margin = 58;
-  const secW = 360;
-  const secH = 300;
-  const x0 = 95, y0 = 55;
+  const w = 900, hSvg = 430;
+  const secW = 390;
+  const secH = 310;
+  const x0 = 105, y0 = 62;
   const slabRatio = r.section.slabDepth / r.section.h;
   const slabH = secH * slabRatio;
   const bottomY = y0 + secH - 34;
@@ -607,17 +606,17 @@ function renderCrossSection(r) {
     <rect x="${x0 + 20}" y="${y0 + 18}" width="${secW - 40}" height="${secH - 36}" rx="12" fill="none" stroke="#2a5caa" stroke-width="3"/>
     ${dowels}
     ${bars}
-    <text x="${x0}" y="26" font-size="15" font-weight="850">Cross-section: b=${fmt(r.inputs.b,0)} mm, h=${fmt(r.inputs.h,0)} mm</text>
-    <text x="${x0 + secW + 24}" y="${y0 + 22}" font-size="12" fill="#2d3b4d"><tspan font-weight="800">Second placement slab</tspan></text>
-    <text x="${x0 + secW + 24}" y="${y0 + 42}" font-size="12" fill="#667587">t=${fmt(r.inputs.slabDepth,0)} mm</text>
-    <text x="${x0 + secW + 24}" y="${y0 + slabH + 6}" font-size="12" fill="#6b4600" font-weight="800">roughened interface</text>
-    <text x="${x0 + secW + 24}" y="${y0 + slabH + 34}" font-size="12" fill="#2a5caa">Primary: ${fmt(r.inputs.stirrupLegs,0)} legs ${r.inputs.stirrupBar} @ ${fmt(r.inputs.stirrupSpacing,0)} mm</text>
-    <text x="${x0 + secW + 24}" y="${y0 + slabH + 56}" font-size="12" fill="#b3261e">Add: ${fmt(r.inputs.dowelLegs,0)} legs ${r.inputs.dowelBar} @ ${fmt(r.inputs.dowelSpacing,0)} mm</text>
-    <text x="${x0 + secW + 24}" y="${y0 + secH - 12}" font-size="12" fill="#1f2937">Bottom steel: ${fmt(r.inputs.mainCount,0)}-${r.inputs.mainBar}</text>
+    <text x="${x0}" y="30" font-size="19" font-weight="850">Cross-section: b=${fmt(r.inputs.b,0)} mm, h=${fmt(r.inputs.h,0)} mm</text>
+    <text x="${x0 + secW + 32}" y="${y0 + 24}" font-size="14" fill="#2d3b4d"><tspan font-weight="800">Second placement slab</tspan></text>
+    <text x="${x0 + secW + 32}" y="${y0 + 47}" font-size="14" fill="#667587">t=${fmt(r.inputs.slabDepth,0)} mm</text>
+    <text x="${x0 + secW + 32}" y="${y0 + slabH + 8}" font-size="14" fill="#6b4600" font-weight="800">roughened interface</text>
+    <text x="${x0 + secW + 32}" y="${y0 + slabH + 40}" font-size="14" fill="#2a5caa">Primary: ${fmt(r.inputs.stirrupLegs,0)} legs ${r.inputs.stirrupBar} @ ${fmt(r.inputs.stirrupSpacing,0)} mm</text>
+    <text x="${x0 + secW + 32}" y="${y0 + slabH + 66}" font-size="14" fill="#b3261e">Add: ${fmt(r.inputs.dowelLegs,0)} legs ${r.inputs.dowelBar} @ ${fmt(r.inputs.dowelSpacing,0)} mm</text>
+    <text x="${x0 + secW + 32}" y="${y0 + secH - 10}" font-size="14" fill="#1f2937">Bottom steel: ${fmt(r.inputs.mainCount,0)}-${r.inputs.mainBar}</text>
     <line x1="${x0 - 26}" y1="${y0}" x2="${x0 - 26}" y2="${y0 + secH}" stroke="#8091a5"/>
     <line x1="${x0 - 33}" y1="${y0}" x2="${x0 - 19}" y2="${y0}" stroke="#8091a5"/>
     <line x1="${x0 - 33}" y1="${y0 + secH}" x2="${x0 - 19}" y2="${y0 + secH}" stroke="#8091a5"/>
-    <text x="${x0 - 38}" y="${y0 + secH/2}" transform="rotate(-90 ${x0 - 38} ${y0 + secH/2})" font-size="12" text-anchor="middle">h</text>
+    <text x="${x0 - 38}" y="${y0 + secH/2}" transform="rotate(-90 ${x0 - 38} ${y0 + secH/2})" font-size="14" text-anchor="middle">h</text>
   </svg>`;
 }
 

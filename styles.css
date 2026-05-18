@@ -245,16 +245,28 @@ input:focus, select:focus {
 }
 
 .svg-wrap {
-  overflow: auto;
+  overflow: hidden;
   border: 1px solid var(--line);
   border-radius: 18px;
   background: #fff;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  padding: 8px 10px;
 }
 
 .svg-wrap svg, .chart-card svg {
   display: block;
   width: 100%;
   height: auto;
+}
+
+#beamElevation svg {
+  max-width: 1080px;
+}
+
+#crossSection svg {
+  max-width: 940px;
 }
 
 .charts {

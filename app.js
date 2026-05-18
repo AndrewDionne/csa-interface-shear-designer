@@ -563,13 +563,13 @@ function labelBeamSystem(system) {
 }
 
 function renderCrossSection(r) {
-  const w = 900, hSvg = 430;
-  const secW = 390;
-  const secH = 310;
-  const x0 = 105, y0 = 62;
+  const w = 760, hSvg = 350;
+  const secW = 310;
+  const secH = 265;
+  const x0 = 78, y0 = 54;
   const slabRatio = r.section.slabDepth / r.section.h;
   const slabH = secH * slabRatio;
-  const bottomY = y0 + secH - 34;
+  const bottomY = y0 + secH - 30;
   const mainCountVisible = Math.min(14, Math.max(1, Math.round(r.inputs.mainCount)));
   const cols = Math.min(7, mainCountVisible);
   const rows = Math.ceil(mainCountVisible / cols);
@@ -577,46 +577,48 @@ function renderCrossSection(r) {
   for (let i = 0; i < mainCountVisible; i++) {
     const row = Math.floor(i / cols);
     const col = i % cols;
-    const bx = x0 + 45 + col * ((secW - 90) / Math.max(1, cols - 1));
-    const by = bottomY - row * 24;
-    bars += `<circle cx="${bx}" cy="${by}" r="8" fill="#1f2937"/>`;
+    const bx = x0 + 38 + col * ((secW - 76) / Math.max(1, cols - 1));
+    const by = bottomY - row * 22;
+    bars += `<circle cx="${bx}" cy="${by}" r="7" fill="#1f2937"/>`;
   }
 
   const stirrupLegs = Math.max(0, Math.round(r.inputs.stirrupLegs));
   let legs = "";
   const nLegs = Math.min(12, stirrupLegs);
   for (let i = 0; i < nLegs; i++) {
-    const lx = x0 + 30 + i * ((secW - 60) / Math.max(1, nLegs - 1));
-    legs += `<line x1="${lx}" y1="${y0 + 16}" x2="${lx}" y2="${y0 + secH - 20}" stroke="#2a5caa" stroke-width="4" opacity="0.85"/>`;
+    const lx = x0 + 24 + i * ((secW - 48) / Math.max(1, nLegs - 1));
+    legs += `<line x1="${lx}" y1="${y0 + 14}" x2="${lx}" y2="${y0 + secH - 18}" stroke="#2a5caa" stroke-width="3.2" opacity="0.85"/>`;
   }
 
   const dowelLegs = Math.max(0, Math.round(r.inputs.dowelLegs));
   let dowels = "";
   const nDowels = Math.min(12, dowelLegs);
   for (let i = 0; i < nDowels; i++) {
-    const dx = x0 + 38 + i * ((secW - 76) / Math.max(1, nDowels - 1));
-    dowels += `<path d="M${dx},${y0 + slabH - 50} V${y0 + slabH + 70} q0,14 14,14 h16" fill="none" stroke="#b3261e" stroke-width="4" stroke-linecap="round"/>`;
+    const dx = x0 + 32 + i * ((secW - 64) / Math.max(1, nDowels - 1));
+    dowels += `<path d="M${dx},${y0 + slabH - 42} V${y0 + slabH + 58} q0,12 12,12 h15" fill="none" stroke="#b3261e" stroke-width="3.4" stroke-linecap="round"/>`;
   }
+
+  const labelX = x0 + secW + 28;
 
   $("crossSection").innerHTML = `<svg viewBox="0 0 ${w} ${hSvg}" role="img" aria-label="Cross-section reinforcement">
     <rect x="${x0}" y="${y0}" width="${secW}" height="${secH}" fill="#edf2f7" stroke="#4a5568" stroke-width="2"/>
     <rect x="${x0}" y="${y0}" width="${secW}" height="${slabH}" fill="#dce9f8" stroke="#4a5568" stroke-width="1.5"/>
-    <line x1="${x0}" y1="${y0 + slabH}" x2="${x0 + secW}" y2="${y0 + slabH}" stroke="#b26a00" stroke-width="4" stroke-dasharray="9 7"/>
+    <line x1="${x0}" y1="${y0 + slabH}" x2="${x0 + secW}" y2="${y0 + slabH}" stroke="#b26a00" stroke-width="3.5" stroke-dasharray="8 7"/>
     ${legs}
-    <rect x="${x0 + 20}" y="${y0 + 18}" width="${secW - 40}" height="${secH - 36}" rx="12" fill="none" stroke="#2a5caa" stroke-width="3"/>
+    <rect x="${x0 + 18}" y="${y0 + 16}" width="${secW - 36}" height="${secH - 32}" rx="12" fill="none" stroke="#2a5caa" stroke-width="3"/>
     ${dowels}
     ${bars}
-    <text x="${x0}" y="30" font-size="19" font-weight="850">Cross-section: b=${fmt(r.inputs.b,0)} mm, h=${fmt(r.inputs.h,0)} mm</text>
-    <text x="${x0 + secW + 32}" y="${y0 + 24}" font-size="14" fill="#2d3b4d"><tspan font-weight="800">Second placement slab</tspan></text>
-    <text x="${x0 + secW + 32}" y="${y0 + 47}" font-size="14" fill="#667587">t=${fmt(r.inputs.slabDepth,0)} mm</text>
-    <text x="${x0 + secW + 32}" y="${y0 + slabH + 8}" font-size="14" fill="#6b4600" font-weight="800">roughened interface</text>
-    <text x="${x0 + secW + 32}" y="${y0 + slabH + 40}" font-size="14" fill="#2a5caa">Primary: ${fmt(r.inputs.stirrupLegs,0)} legs ${r.inputs.stirrupBar} @ ${fmt(r.inputs.stirrupSpacing,0)} mm</text>
-    <text x="${x0 + secW + 32}" y="${y0 + slabH + 66}" font-size="14" fill="#b3261e">Add: ${fmt(r.inputs.dowelLegs,0)} legs ${r.inputs.dowelBar} @ ${fmt(r.inputs.dowelSpacing,0)} mm</text>
-    <text x="${x0 + secW + 32}" y="${y0 + secH - 10}" font-size="14" fill="#1f2937">Bottom steel: ${fmt(r.inputs.mainCount,0)}-${r.inputs.mainBar}</text>
-    <line x1="${x0 - 26}" y1="${y0}" x2="${x0 - 26}" y2="${y0 + secH}" stroke="#8091a5"/>
-    <line x1="${x0 - 33}" y1="${y0}" x2="${x0 - 19}" y2="${y0}" stroke="#8091a5"/>
-    <line x1="${x0 - 33}" y1="${y0 + secH}" x2="${x0 - 19}" y2="${y0 + secH}" stroke="#8091a5"/>
-    <text x="${x0 - 38}" y="${y0 + secH/2}" transform="rotate(-90 ${x0 - 38} ${y0 + secH/2})" font-size="14" text-anchor="middle">h</text>
+    <text x="${x0}" y="30" font-size="17" font-weight="850">Cross-section: b=${fmt(r.inputs.b,0)} mm, h=${fmt(r.inputs.h,0)} mm</text>
+    <text x="${labelX}" y="${y0 + 22}" font-size="13" fill="#2d3b4d"><tspan font-weight="800">Second placement slab</tspan></text>
+    <text x="${labelX}" y="${y0 + 43}" font-size="12.5" fill="#667587">t=${fmt(r.inputs.slabDepth,0)} mm</text>
+    <text x="${labelX}" y="${y0 + slabH + 7}" font-size="13" fill="#6b4600" font-weight="800">roughened interface</text>
+    <text x="${labelX}" y="${y0 + slabH + 34}" font-size="13" fill="#2a5caa">Primary: ${fmt(r.inputs.stirrupLegs,0)} legs ${r.inputs.stirrupBar} @ ${fmt(r.inputs.stirrupSpacing,0)} mm</text>
+    <text x="${labelX}" y="${y0 + slabH + 58}" font-size="13" fill="#b3261e">Add: ${fmt(r.inputs.dowelLegs,0)} legs ${r.inputs.dowelBar} @ ${fmt(r.inputs.dowelSpacing,0)} mm</text>
+    <text x="${labelX}" y="${y0 + secH - 10}" font-size="13" fill="#1f2937">Bottom steel: ${fmt(r.inputs.mainCount,0)}-${r.inputs.mainBar}</text>
+    <line x1="${x0 - 24}" y1="${y0}" x2="${x0 - 24}" y2="${y0 + secH}" stroke="#8091a5"/>
+    <line x1="${x0 - 31}" y1="${y0}" x2="${x0 - 17}" y2="${y0}" stroke="#8091a5"/>
+    <line x1="${x0 - 31}" y1="${y0 + secH}" x2="${x0 - 17}" y2="${y0 + secH}" stroke="#8091a5"/>
+    <text x="${x0 - 35}" y="${y0 + secH/2}" transform="rotate(-90 ${x0 - 35} ${y0 + secH/2})" font-size="13" text-anchor="middle">h</text>
   </svg>`;
 }
 

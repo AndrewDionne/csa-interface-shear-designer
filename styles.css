@@ -245,28 +245,42 @@ input:focus, select:focus {
 }
 
 .svg-wrap {
-  overflow: hidden;
+  overflow: auto;
   border: 1px solid var(--line);
   border-radius: 18px;
   background: #fff;
   display: flex;
   justify-content: center;
   align-items: center;
-  padding: 8px 10px;
+  padding: 10px 12px;
 }
 
 .svg-wrap svg, .chart-card svg {
   display: block;
-  width: 100%;
+  max-width: 100%;
   height: auto;
 }
 
+.svg-wrap svg {
+  width: auto;
+}
+
+.chart-card svg {
+  width: 100%;
+}
+
 #beamElevation svg {
-  max-width: 1080px;
+  width: min(100%, 820px);
+  max-height: 235px;
+}
+
+#crossSection {
+  max-height: 390px;
 }
 
 #crossSection svg {
-  max-width: 940px;
+  width: min(100%, 720px);
+  max-height: 360px;
 }
 
 .charts {

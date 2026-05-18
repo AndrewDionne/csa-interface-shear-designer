@@ -723,7 +723,8 @@ function renderElevation(r) {
   const topY = 68;
   const jointY = topY + slabH;
   const bottomY = topY + totalBeamH;
-  const zoneY = bottomY + 42;
+  const zoneY = bottomY + 38;
+  const sliderTopY = zoneY + 6;
 
   let arrows = "";
   const wLabel = r.inputs.Wf !== 0 ? `<text x="${left + 3}" y="${topY - 22}" font-size="10.5" fill="#1f6feb">Wf=${fmt(r.inputs.Wf,1)} kN/m</text>` : "";
@@ -756,7 +757,7 @@ function renderElevation(r) {
        <text x="${scaleX(r.inputs.L1 + r.inputs.L2/2, L, left, plotW)}" y="${bottomY + 67}" text-anchor="middle" font-size="12">L2=${fmt(r.inputs.L2,2)} m</text>`
     : `<text x="${left + plotW/2}" y="${bottomY + 67}" text-anchor="middle" font-size="12">L=${fmt(r.inputs.L1,2)} m</text>`;
 
-  const diagramTop = Math.max(255, zoneY + 52);
+  const diagramTop = Math.max(270, sliderTopY + 34);
   const miniM = buildMiniDiagram(r, "M", "Mf diagram", "kN·m", diagramTop, left, plotW, 105, false, { positiveDown: true, bg: "#f7fbff", station: st });
   const miniV = buildMiniDiagram(r, "V", "Vf diagram", "kN", diagramTop + 132, left, plotW, 105, false, { bg: "#f7fafc", station: st });
   const miniInterface = buildMiniInterfaceDiagram(r, diagramTop + 264, left, plotW, 112, st);
@@ -802,7 +803,7 @@ function renderElevation(r) {
   $("beamElevation").innerHTML = `
     <div class="beam-elev-wrap">
       ${svg}
-      <div class="beam-slider-overlay" style="left:${left}px; width:${plotW}px; top:${zoneY - 12}px;">
+      <div class="beam-slider-overlay" style="left:${(left / width * 100).toFixed(3)}%; width:${(plotW / width * 100).toFixed(3)}%; top:${(sliderTopY / height * 100).toFixed(3)}%;">
         <input id="stationSlider" type="range" min="0" max="${r.stations.length - 1}" step="1" value="${selectedStationIndex}" aria-label="Station along beam" />
       </div>
     </div>`;

@@ -42,13 +42,12 @@ const DEFAULTS = {
   dowelBar: "15M",
   dowelLegs: 4,
   dowelSpacing: 350,
-  zoneDesignMode: "auto",
+  zoneDesignMode: "zoned",
   zoneDesignStrategy: "primaryFirst",
   zoneMinSpacing: 100,
   zoneMaxSpacing: 450,
   zoneMaxCount: 5,
-  zoneMinLength: 1.0,
-  manualSupportZoneLength: 3.0
+  zoneMinLength: 0
 };
 
 let lastResult = null;
@@ -138,9 +137,8 @@ function updateConditionalInputs() {
   setParentLabelHidden("L2", system !== "twoSpan");
   setParentLabelHidden("Pf", !pointOn);
   setParentLabelHidden("Px", !pointOn);
-  setParentLabelHidden("manualSupportZoneLength", mode !== "manual");
-  setParentLabelHidden("zoneMaxCount", mode !== "auto");
-  setParentLabelHidden("zoneMinLength", mode !== "auto");
+  setParentLabelHidden("zoneMaxCount", mode !== "zoned");
+  setParentLabelHidden("zoneMinLength", mode !== "zoned");
   setParentLabelHidden("dowelBar", val("zoneDesignStrategy") !== "addDowels" && num("dowelLegs") <= 0);
   setParentLabelHidden("dowelLegs", val("zoneDesignStrategy") !== "addDowels" && num("dowelLegs") <= 0);
   setParentLabelHidden("dowelSpacing", val("zoneDesignStrategy") !== "addDowels" && num("dowelLegs") <= 0);
@@ -325,8 +323,7 @@ function collectInputs() {
     zoneMinSpacing: num("zoneMinSpacing"),
     zoneMaxSpacing: num("zoneMaxSpacing"),
     zoneMaxCount: Math.round(num("zoneMaxCount")),
-    zoneMinLength: num("zoneMinLength"),
-    manualSupportZoneLength: num("manualSupportZoneLength")
+    zoneMinLength: num("zoneMinLength")
   };
 
   inputs.L1 = Math.max(0.1, inputs.L1);
@@ -337,7 +334,6 @@ function collectInputs() {
   inputs.zoneMaxSpacing = Math.max(inputs.zoneMinSpacing, inputs.zoneMaxSpacing || 450);
   inputs.zoneMaxCount = Math.max(1, Math.min(9, inputs.zoneMaxCount || 5));
   inputs.zoneMinLength = Math.max(0, inputs.zoneMinLength || 0);
-  inputs.manualSupportZoneLength = Math.max(0, Math.min(beamLength(inputs) / 2, inputs.manualSupportZoneLength || 0));
   return inputs;
 }
 
@@ -484,6 +480,11 @@ function runCalculations() {
     summary: { maxV, maxMpos, maxMneg, maxMabs, maxQ, maxStress, Vc, Vs, Vr, VrMax, beta, thetaDeg, cotTheta, beamAvReqPerM: beamAvReqPerM2, highShearThreshold, sMax, AvMin, stirrupAvSet, stirrupAvPerM, dowelAvSet, dowelAvPerM, rhoReq, interfaceAvReqPerM, concreteLimit, unusedStirrupAv, additionalInterfaceReq, totalInterfaceAvailable, interfaceStressResistanceRaw, interfaceStressResistance, beamShearRatio, interfaceShearRatio, flexRatio, combinedShearRatio, shearUtilizationOk, flexUtilizationOk, verticalStrengthOk, verticalSpacingOk, minSteelOk, interfaceOk, flex }
   };
   result.summary.zoneSchedule = computeZoneSchedule(result);
+  Object.assign(result.summary, evaluateZoneScheduleUtilization(result));
+  result.summary.beamShearRatio = result.summary.zoneBeamShearRatio;
+  result.summary.interfaceShearRatio = result.summary.zoneInterfaceShearRatio;
+  result.summary.combinedShearRatio = result.summary.zoneCombinedShearRatio;
+  result.summary.shearUtilizationOk = result.summary.zoneCombinedShearRatio <= 1.0;
 
   lastResult = result;
   render(result);
@@ -573,8 +574,42 @@ function localSpacingLimit(r, station) {
   return { minSteelSpacingLimit, sMaxLocal };
 }
 
-function stationDesignRequirement(r, station) {
+function spacingOptions(minSpacing, maxSpacing) {
+  const base = [600, 550, 500, 450, 400, 375, 350, 325, 300, 275, 250, 225, 200, 175, 150, 125, 100, 75, 50];
+  const min = Math.max(50, Math.min(minSpacing || 50, maxSpacing || 600));
+  const max = Math.max(min, maxSpacing || 600);
+  const opts = base.filter(v => v >= min - 1e-9 && v <= max + 1e-9);
+  if (!opts.includes(min)) opts.push(min);
+  if (!opts.includes(max)) opts.push(max);
+  return [...new Set(opts)].sort((a, b) => b - a);
+}
+
+function evaluateDetailAtStation(r, station, primarySpacing, dowelSpacing = null) {
+  const s = r.summary;
+  const i = r.inputs;
   const local = localDesignForStation(r, station);
+  const primarySet = Math.max(0, s.stirrupAvSet);
+  const dowelSet = Math.max(0, s.dowelAvSet);
+  const primaryPerM = primarySet > 0 && primarySpacing > 0 ? primarySet / primarySpacing * 1000 : 0;
+  const Vs = i.phiS * (primarySet / Math.max(1, primarySpacing)) * i.fy * r.section.dv * s.cotTheta / 1000;
+  const Vr = s.Vc + Vs;
+  const beamRatio = Math.abs(station.V) / Math.max(1e-9, Vr);
+  const unused = i.allocation === "balance" ? Math.max(0, primaryPerM - local.beamAvReqPerM) : primaryPerM;
+  const dowelPerM = dowelSet > 0 && dowelSpacing ? dowelSet / dowelSpacing * 1000 : 0;
+  const totalInterfaceAvailable = unused + dowelPerM;
+  const rho = totalInterfaceAvailable / Math.max(1, r.section.b * 1000);
+  const interfaceResistanceRaw = i.lambda * i.phiC * (i.cohesion + i.mu * rho * i.fy);
+  const interfaceResistance = Math.min(s.concreteLimit, interfaceResistanceRaw);
+  const interfaceRatio = Math.abs(station.vInterface) / Math.max(1e-9, interfaceResistance);
+  const shearRatio = beamRatio + interfaceRatio;
+  const spacingLimit = localSpacingLimit(r, station);
+  const minSteelOk = primarySet >= 0.06 * Math.sqrt(Math.max(0, i.fc)) * r.section.b * primarySpacing / Math.max(1, i.fy);
+  const spacingOk = primarySpacing <= spacingLimit.sMaxLocal + 1e-9;
+  const ok = shearRatio <= 1.0 + 1e-9 && spacingOk && minSteelOk;
+  return { ...local, primarySpacing, primaryPerM, dowelSpacing, dowelPerM, totalInterfaceAvailable, interfaceResistance, beamRatio, interfaceRatio, shearRatio, Vs, Vr, spacingOk, minSteelOk, ok };
+}
+
+function stationDesignRequirement(r, station) {
   const i = r.inputs;
   const s = r.summary;
   const primarySet = Math.max(0, s.stirrupAvSet);
@@ -582,109 +617,226 @@ function stationDesignRequirement(r, station) {
   const limits = localSpacingLimit(r, station);
   const zoneMin = Math.max(50, i.zoneMinSpacing);
   const zoneMax = Math.max(zoneMin, i.zoneMaxSpacing);
-  const totalPrimaryReq = i.allocation === "balance"
-    ? local.beamAvReqPerM + local.interfaceAvReqPerM
-    : Math.max(local.beamAvReqPerM, local.interfaceAvReqPerM);
-  const strengthSpacing = totalPrimaryReq > 1e-9 && primarySet > 0 ? primarySet * 1000 / totalPrimaryReq : Infinity;
-  const limit = Math.min(zoneMax, limits.minSteelSpacingLimit || zoneMax, limits.sMaxLocal, strengthSpacing);
-  let primarySpacing = i.zoneDesignStrategy === "addDowels" ? Math.min(zoneMax, limits.minSteelSpacingLimit || zoneMax, limits.sMaxLocal) : limit;
-  primarySpacing = Math.max(zoneMin, niceSpacing(primarySpacing));
-  const primaryOk = primarySpacing <= limit + 1e-6 || i.zoneDesignStrategy === "addDowels";
+  const maxPrimarySpacing = Math.min(zoneMax, limits.minSteelSpacingLimit || zoneMax, limits.sMaxLocal);
+  const primaryOptions = spacingOptions(zoneMin, maxPrimarySpacing);
+  const dowelOptions = spacingOptions(zoneMin, zoneMax);
 
-  const primaryPerM = primarySet > 0 && primarySpacing > 0 ? primarySet / primarySpacing * 1000 : 0;
-  const unused = i.allocation === "balance" ? Math.max(0, primaryPerM - local.beamAvReqPerM) : primaryPerM;
-  const addReq = Math.max(0, local.interfaceAvReqPerM - unused);
-  let dowelSpacing = null;
-  let dowelOk = addReq <= 1e-9;
-  if (addReq > 1e-9 && dowelSet > 0) {
-    const dLimit = Math.min(zoneMax, dowelSet * 1000 / addReq);
-    dowelSpacing = Math.max(zoneMin, niceSpacing(dLimit));
-    dowelOk = dowelSpacing <= dLimit + 1e-6;
+  function bestWithDowels(primarySpacing) {
+    let best = evaluateDetailAtStation(r, station, primarySpacing, null);
+    if (best.ok || dowelSet <= 0) return best;
+    for (const ds of dowelOptions) {
+      const trial = evaluateDetailAtStation(r, station, primarySpacing, ds);
+      if (trial.ok) return trial;
+      if (!best || trial.shearRatio < best.shearRatio) best = trial;
+    }
+    return best;
   }
-  const ok = primaryOk && dowelOk;
-  return { ...local, primarySpacing, primaryPerM, addReq, dowelSpacing, ok, limits, strengthSpacing, totalPrimaryReq };
-}
 
+  let best = null;
+
+  if (i.zoneDesignStrategy === "addDowels") {
+    const selected = clamp(i.stirrupSpacing || maxPrimarySpacing, zoneMin, maxPrimarySpacing || zoneMin);
+    best = bestWithDowels(niceSpacing(selected));
+  } else {
+    for (const ps of primaryOptions) {
+      const trial = evaluateDetailAtStation(r, station, ps, null);
+      if (!best || trial.shearRatio < best.shearRatio || (trial.ok && (!best.ok || ps > best.primarySpacing))) best = trial;
+      if (trial.ok) return trial;
+    }
+    const tightest = primaryOptions[primaryOptions.length - 1] || zoneMin;
+    const withDowels = bestWithDowels(tightest);
+    if (!best || withDowels.shearRatio < best.shearRatio) best = withDowels;
+  }
+
+  return { ...best, limits };
+}
 function governingDesignForRange(r, x1, x2) {
   const stations = r.stations.filter(st => st.x >= x1 - 1e-9 && st.x <= x2 + 1e-9);
   const list = stations.length ? stations : [r.stations.reduce((best, st) => Math.abs(st.x - (x1 + x2)/2) < Math.abs(best.x - (x1 + x2)/2) ? st : best, r.stations[0])];
   let gov = null;
   for (const st of list) {
     const req = stationDesignRequirement(r, st);
-    if (!gov || req.totalPrimaryReq > gov.totalPrimaryReq || req.addReq > gov.addReq) gov = { ...req, station: st };
+    const trial = { ...req, station: st };
+    if (!gov) { gov = trial; continue; }
+    const trialDowel = trial.dowelSpacing || Infinity;
+    const govDowel = gov.dowelSpacing || Infinity;
+    const trialScore = (trial.ok ? 0 : -100000) - (trial.primarySpacing || 9999) - 0.1 * trialDowel + 1000 * (trial.shearRatio || 0);
+    const govScore = (gov.ok ? 0 : -100000) - (gov.primarySpacing || 9999) - 0.1 * govDowel + 1000 * (gov.shearRatio || 0);
+    if (trial.primarySpacing < gov.primarySpacing - 1e-9 ||
+        (Math.abs(trial.primarySpacing - gov.primarySpacing) < 1e-9 && trialDowel < govDowel - 1e-9) ||
+        (!trial.ok && gov.ok) ||
+        (Math.abs(trial.primarySpacing - gov.primarySpacing) < 1e-9 && Math.abs(trialDowel - govDowel) < 1e-9 && trialScore > govScore)) {
+      gov = trial;
+    }
   }
   return gov;
+}
+function segmentKey(seg) {
+  return `${Math.round(seg.primarySpacing || 0)}|${seg.dowelSpacing ? Math.round(seg.dowelSpacing) : 0}|${seg.ok ? 1 : 0}`;
+}
+
+function zoneMinimumLength(r) {
+  const userMin = r.inputs.zoneMinLength || 0;
+  const twoD = 2 * r.section.d / 1000;
+  return Math.max(userMin, twoD);
+}
+
+function recomputeSegment(r, x1, x2) {
+  const gov = governingDesignForRange(r, x1, x2);
+  return { x1, x2, gov, primarySpacing: gov.primarySpacing, dowelSpacing: gov.dowelSpacing, addReq: gov.addReq, ok: gov.ok };
+}
+
+function mergeAdjacentSameDetail(segments) {
+  const out = [];
+  for (const seg of segments) {
+    const prev = out[out.length - 1];
+    if (prev && segmentKey(prev) === segmentKey(seg) && Math.abs(prev.x2 - seg.x1) < 1e-6) {
+      prev.x2 = seg.x2;
+      if (seg.gov && (!prev.gov || seg.gov.shearRatio > prev.gov.shearRatio)) prev.gov = seg.gov;
+      prev.addReq = Math.max(prev.addReq || 0, seg.addReq || 0);
+      prev.ok = prev.ok && seg.ok;
+    } else {
+      out.push({ ...seg });
+    }
+  }
+  return out;
+}
+
+function consolidateScheduleRows(r, segments) {
+  const rows = [];
+  for (const seg of segments) {
+    const key = segmentKey(seg);
+    let row = rows.find(z => z.key === key);
+    if (!row) {
+      row = { key, name: `Zone ${rows.length + 1}`, ranges: [], gov: seg.gov, primarySpacing: seg.primarySpacing, dowelSpacing: seg.dowelSpacing, addReq: seg.addReq || 0, ok: seg.ok, mode: r.inputs.zoneDesignMode === "uniform" ? "Uniform" : "Zoned demand envelope" };
+      rows.push(row);
+    }
+    row.ranges.push({ x1: seg.x1, x2: seg.x2 });
+    if (seg.gov && (!row.gov || seg.gov.shearRatio > row.gov.shearRatio)) row.gov = seg.gov;
+    row.addReq = Math.max(row.addReq || 0, seg.addReq || 0);
+    row.ok = row.ok && seg.ok;
+  }
+  rows.forEach((row, idx) => {
+    row.name = `Zone ${idx + 1}`;
+    row.x1 = row.ranges[0].x1;
+    row.x2 = row.ranges[row.ranges.length - 1].x2;
+    row.length = row.ranges.reduce((sum, rg) => sum + Math.max(0, rg.x2 - rg.x1), 0);
+  });
+  return rows;
 }
 
 function computeZoneSchedule(r) {
   const i = r.inputs;
   const L = beamLength(i);
-  const zones = [];
 
   if (i.zoneDesignMode === "uniform") {
     const gov = governingDesignForRange(r, 0, L);
-    const primarySpacing = i.stirrupSpacing;
-    const primaryPerM = r.summary.stirrupAvSet / Math.max(1, primarySpacing) * 1000;
-    const unused = i.allocation === "balance" ? Math.max(0, primaryPerM - gov.beamAvReqPerM) : primaryPerM;
-    const addReq = Math.max(0, gov.interfaceAvReqPerM - unused);
-    zones.push({ name: "Zone 1", x1: 0, x2: L, gov, primarySpacing, dowelSpacing: i.dowelLegs > 0 ? i.dowelSpacing : null, addReq, ok: true, mode: "Uniform selected detail" });
-    return zones;
+    const actual = evaluateDetailAtStation(r, gov.station, i.stirrupSpacing, i.dowelLegs > 0 ? i.dowelSpacing : null);
+    return consolidateScheduleRows(r, [{ x1: 0, x2: L, gov: actual, primarySpacing: i.stirrupSpacing, dowelSpacing: i.dowelLegs > 0 ? i.dowelSpacing : null, addReq: actual.addReq || 0, ok: actual.ok }]);
   }
 
-  if (i.zoneDesignMode === "manual") {
-    const a = Math.min(L / 2, i.manualSupportZoneLength || 0);
-    const raw = a > 0 ? [[0, a], [a, L - a], [L - a, L]] : [[0, L]];
-    raw.forEach((seg, idx) => {
-      if (seg[1] - seg[0] <= 1e-6) return;
-      const gov = governingDesignForRange(r, seg[0], seg[1]);
-      zones.push({ name: raw.length === 3 ? (idx === 1 ? "Zone B" : "Zone A") : `Zone ${idx + 1}`, x1: seg[0], x2: seg[1], gov, primarySpacing: gov.primarySpacing, dowelSpacing: gov.dowelSpacing, addReq: gov.addReq, ok: gov.ok, mode: "Manual support-zone length" });
-    });
-    return zones;
-  }
-
-  // Auto mode: calculate a required practical spacing at each station, then merge into sensible regions.
   const stationReqs = r.stations.map(st => ({ station: st, req: stationDesignRequirement(r, st) }));
-  const initial = [];
+  let segments = [];
   let start = stationReqs[0];
-  let currentSpacing = start.req.primarySpacing;
+  let currentKey = segmentKey(start.req);
   for (let idx = 1; idx < stationReqs.length; idx++) {
     const item = stationReqs[idx];
-    if (item.req.primarySpacing !== currentSpacing) {
-      initial.push({ x1: start.station.x, x2: stationReqs[idx - 1].station.x, spacing: currentSpacing });
+    const key = segmentKey(item.req);
+    if (key !== currentKey) {
+      segments.push(recomputeSegment(r, start.station.x, stationReqs[idx - 1].station.x));
       start = item;
-      currentSpacing = item.req.primarySpacing;
+      currentKey = key;
     }
   }
-  initial.push({ x1: start.station.x, x2: stationReqs[stationReqs.length - 1].station.x, spacing: currentSpacing });
+  segments.push(recomputeSegment(r, start.station.x, stationReqs[stationReqs.length - 1].station.x));
+  segments = mergeAdjacentSameDetail(segments);
 
-  let merged = [];
-  for (const seg of initial) {
-    const length = seg.x2 - seg.x1;
-    if (merged.length && (seg.spacing === merged[merged.length - 1].spacing || length < i.zoneMinLength)) {
-      const prev = merged[merged.length - 1];
-      prev.x2 = seg.x2;
-      prev.spacing = Math.min(prev.spacing, seg.spacing);
-    } else {
-      merged.push({ ...seg });
+  const minLen = zoneMinimumLength(r);
+  let changed = true;
+  while (changed && segments.length > 1) {
+    changed = false;
+    for (let idx = 0; idx < segments.length; idx++) {
+      const len = segments[idx].x2 - segments[idx].x1;
+      if (len >= minLen - 1e-9) continue;
+      if (idx === 0) {
+        const newX = Math.min(L, segments[idx].x1 + minLen);
+        if (segments[idx + 1] && newX < segments[idx + 1].x2 - 1e-6) {
+          segments[idx] = recomputeSegment(r, segments[idx].x1, newX);
+          segments[idx + 1] = recomputeSegment(r, newX, segments[idx + 1].x2);
+          changed = true;
+          break;
+        }
+      } else if (idx === segments.length - 1) {
+        const newX = Math.max(0, segments[idx].x2 - minLen);
+        if (segments[idx - 1] && newX > segments[idx - 1].x1 + 1e-6) {
+          segments[idx - 1] = recomputeSegment(r, segments[idx - 1].x1, newX);
+          segments[idx] = recomputeSegment(r, newX, segments[idx].x2);
+          changed = true;
+          break;
+        }
+      }
+      const left = idx > 0 ? idx - 1 : null;
+      const right = idx < segments.length - 1 ? idx + 1 : null;
+      let mergeIdx = right;
+      if (left !== null && right !== null) {
+        const leftPenalty = Math.abs((segments[left].primarySpacing || 0) - (segments[idx].primarySpacing || 0));
+        const rightPenalty = Math.abs((segments[right].primarySpacing || 0) - (segments[idx].primarySpacing || 0));
+        mergeIdx = leftPenalty <= rightPenalty ? left : right;
+      } else if (left !== null) {
+        mergeIdx = left;
+      }
+      if (mergeIdx === null) break;
+      const a = Math.min(idx, mergeIdx);
+      const b = Math.max(idx, mergeIdx);
+      const combined = recomputeSegment(r, segments[a].x1, segments[b].x2);
+      segments.splice(a, 2, combined);
+      changed = true;
+      break;
     }
+    segments = mergeAdjacentSameDetail(segments);
   }
 
-  while (merged.length > i.zoneMaxCount) {
+  while (segments.length > i.zoneMaxCount) {
     let best = 0;
     let bestPenalty = Infinity;
-    for (let idx = 0; idx < merged.length - 1; idx++) {
-      const penalty = Math.abs(merged[idx].spacing - merged[idx + 1].spacing) + Math.min(merged[idx].x2 - merged[idx].x1, merged[idx + 1].x2 - merged[idx + 1].x1);
+    for (let idx = 0; idx < segments.length - 1; idx++) {
+      const penalty = Math.abs((segments[idx].primarySpacing || 0) - (segments[idx + 1].primarySpacing || 0)) + Math.abs((segments[idx].dowelSpacing || 0) - (segments[idx + 1].dowelSpacing || 0));
       if (penalty < bestPenalty) { bestPenalty = penalty; best = idx; }
     }
-    merged[best] = { x1: merged[best].x1, x2: merged[best + 1].x2, spacing: Math.min(merged[best].spacing, merged[best + 1].spacing) };
-    merged.splice(best + 1, 1);
+    segments.splice(best, 2, recomputeSegment(r, segments[best].x1, segments[best + 1].x2));
+    segments = mergeAdjacentSameDetail(segments);
   }
 
-  merged.forEach((seg, idx) => {
-    const gov = governingDesignForRange(r, seg.x1, seg.x2);
-    zones.push({ name: `Zone ${idx + 1}`, x1: seg.x1, x2: seg.x2, gov, primarySpacing: Math.min(seg.spacing, gov.primarySpacing), dowelSpacing: gov.dowelSpacing, addReq: gov.addReq, ok: gov.ok, mode: "Auto demand envelope" });
-  });
-  return zones;
+  return consolidateScheduleRows(r, segments);
+}
+
+function evaluateZoneScheduleUtilization(r) {
+  const zones = r.summary.zoneSchedule || [];
+  let maxBeam = 0;
+  let maxInterface = 0;
+  let maxCombined = 0;
+  let controlling = null;
+  for (const z of zones) {
+    const ranges = z.ranges || [{ x1: z.x1, x2: z.x2 }];
+    for (const rg of ranges) {
+      const stations = r.stations.filter(st => st.x >= rg.x1 - 1e-9 && st.x <= rg.x2 + 1e-9);
+      for (const st of stations) {
+        const ev = evaluateDetailAtStation(r, st, z.primarySpacing, z.dowelSpacing || null);
+        if (ev.shearRatio > maxCombined) {
+          maxCombined = ev.shearRatio;
+          maxBeam = ev.beamRatio;
+          maxInterface = ev.interfaceRatio;
+          controlling = { station: st, zone: z, ev };
+        }
+      }
+    }
+  }
+  if (!zones.length) {
+    maxBeam = r.summary.beamShearRatio;
+    maxInterface = r.summary.interfaceShearRatio;
+    maxCombined = r.summary.combinedShearRatio;
+  }
+  return { zoneBeamShearRatio: maxBeam, zoneInterfaceShearRatio: maxInterface, zoneCombinedShearRatio: maxCombined, zoneControlling: controlling };
 }
 
 function renderZoneSchedule(r) {
@@ -696,28 +848,30 @@ function renderZoneSchedule(r) {
     return;
   }
   const i = r.inputs;
+  const minLen = zoneMinimumLength(r);
   const rows = zones.map(z => {
+    const ranges = (z.ranges || [{ x1: z.x1, x2: z.x2 }]).map(rg => `${fmt(rg.x1,2)}–${fmt(rg.x2,2)}`).join("; ");
     const dowelText = z.dowelSpacing ? `${fmt(i.dowelLegs,0)} legs ${i.dowelBar} @ ${fmt(z.dowelSpacing,0)} mm` : (z.addReq > 1e-9 ? `Needs ${fmt(z.addReq,0)} mm²/m added interface steel` : "None");
     const cls = z.ok ? "ok" : "ng";
     return `<tr class="${cls}">
       <td>${z.name}</td>
-      <td>${fmt(z.x1,2)} – ${fmt(z.x2,2)}</td>
-      <td>${fmt(z.x2 - z.x1,2)}</td>
+      <td>${ranges}</td>
+      <td>${fmt(z.length ?? (z.x2 - z.x1),2)}</td>
       <td>${fmt(Math.abs(z.gov.station.V),0)}</td>
       <td>${fmt(Math.abs(z.gov.station.M),0)}</td>
       <td>${fmt(z.gov.interfaceAvReqPerM,0)}</td>
       <td>${fmt(i.stirrupLegs,0)} legs ${i.stirrupBar} @ ${fmt(z.primarySpacing,0)} mm</td>
       <td>${dowelText}</td>
+      <td>${fmt(z.gov.shearRatio,2)}</td>
       <td><span class="mini-status ${cls}">${z.ok ? "OK" : "NG"}</span></td>
     </tr>`;
   }).join("");
-  el.innerHTML = `<div class="zone-summary">Mode: <strong>${i.zoneDesignMode}</strong> · Strategy: <strong>${i.zoneDesignStrategy}</strong> · spacing range ${fmt(i.zoneMinSpacing,0)}–${fmt(i.zoneMaxSpacing,0)} mm</div>
+  el.innerHTML = `<div class="zone-summary">Mode: <strong>${i.zoneDesignMode}</strong> · Strategy: <strong>${i.zoneDesignStrategy}</strong> · spacing range ${fmt(i.zoneMinSpacing,0)}–${fmt(i.zoneMaxSpacing,0)} mm · minimum zone length ${fmt(minLen,2)} m (≥2d)</div>
     <div class="table-wrap zone-table-wrap"><table class="zone-table">
-      <thead><tr><th>Zone</th><th>x range, m</th><th>Length, m</th><th>|Vf|, kN</th><th>|Mf|, kN·m</th><th>Interface req, mm²/m</th><th>Primary shear reinforcement</th><th>Added interface dowels</th><th>Status</th></tr></thead>
+      <thead><tr><th>Zone</th><th>x range, m</th><th>Total length, m</th><th>|Vf|, kN</th><th>|Mf|, kN·m</th><th>Interface req, mm²/m</th><th>Primary shear reinforcement</th><th>Added interface dowels</th><th>Shear util.</th><th>Status</th></tr></thead>
       <tbody>${rows}</tbody>
     </table></div>`;
 }
-
 function renderSummary(r) {
   const s = r.summary;
   const reactions = r.fe.reactions.map((rx, i) => `R${i + 1}=${fmt(rx.vertical, 0)}`).join(", ");
@@ -886,15 +1040,18 @@ function buildShearZones(r, left, plotW, L, y) {
   const schedule = r.summary.zoneSchedule || [];
   if (schedule.length) {
     return schedule.map((seg, idx) => {
-      const x1 = scaleX(seg.x1, L, left, plotW);
-      const x2 = scaleX(seg.x2, L, left, plotW);
       const color = idx % 2 === 0 ? "#b3261e" : "#b26a00";
-      const mid = (x1 + x2) / 2;
-      const label = `${seg.name}: ${fmt(seg.primarySpacing,0)} mm`;
-      return `<line x1="${x1}" y1="${y}" x2="${x2}" y2="${y}" stroke="${color}" stroke-width="3.2"/>
-              <line x1="${x1}" y1="${y - 12}" x2="${x1}" y2="${y + 12}" stroke="${color}" stroke-width="2"/>
-              <line x1="${x2}" y1="${y - 8}" x2="${x2}" y2="${y + 8}" stroke="${color}" stroke-width="1.5" opacity="0.7"/>
-              <text x="${mid}" y="${y + 21}" text-anchor="middle" font-size="10.5" fill="${color}">${label}</text>`;
+      const ranges = seg.ranges || [{ x1: seg.x1, x2: seg.x2 }];
+      return ranges.map((rg, ridx) => {
+        const x1 = scaleX(rg.x1, L, left, plotW);
+        const x2 = scaleX(rg.x2, L, left, plotW);
+        const mid = (x1 + x2) / 2;
+        const label = `${seg.name}: ${fmt(seg.primarySpacing,0)} mm${seg.dowelSpacing ? ` + D@${fmt(seg.dowelSpacing,0)}` : ""}`;
+        return `<line x1="${x1}" y1="${y}" x2="${x2}" y2="${y}" stroke="${color}" stroke-width="3.2"/>
+                <line x1="${x1}" y1="${y - 12}" x2="${x1}" y2="${y + 12}" stroke="${color}" stroke-width="2"/>
+                <line x1="${x2}" y1="${y - 8}" x2="${x2}" y2="${y + 8}" stroke="${color}" stroke-width="1.5" opacity="0.7"/>
+                <text x="${mid}" y="${y + 21 + (ridx % 2) * 12}" text-anchor="middle" font-size="10.5" fill="${color}">${label}</text>`;
+      }).join("");
     }).join("");
   }
 
@@ -921,7 +1078,6 @@ function buildShearZones(r, left, plotW, L, y) {
             <text x="${(x1 + x2)/2}" y="${y + 20}" text-anchor="middle" font-size="11" fill="${color}">Shear zone ${seg.zone}</text>`;
   }).join("");
 }
-
 function renderElevation(r) {
   const width = 980, height = 660, left = 78, right = 42;
   const L = beamLength(r.inputs);
@@ -1045,9 +1201,8 @@ function labelBeamSystem(system) {
 function zoneForStation(r, station) {
   const zones = r.summary.zoneSchedule || [];
   if (!station || !zones.length) return null;
-  return zones.find(z => station.x >= z.x1 - 1e-9 && station.x <= z.x2 + 1e-9) || zones[zones.length - 1];
+  return zones.find(z => (z.ranges || [{ x1: z.x1, x2: z.x2 }]).some(rg => station.x >= rg.x1 - 1e-9 && station.x <= rg.x2 + 1e-9)) || zones[zones.length - 1];
 }
-
 function renderCrossSection(r) {
   const w = 500, hSvg = 520;
   const x0 = 82, y0 = 82;
@@ -1392,66 +1547,54 @@ function niceSpacing(limit) {
 function previewAutoDesign(apply = false) {
   if (!lastResult) runCalculations();
   const r = lastResult;
-  const s = r.summary;
+  const concept = $("autoZoneCount") ? val("autoZoneCount") : "zoned";
   const strategy = $("autoStrategy") ? val("autoStrategy") : "primaryOnly";
-  const zones = $("autoZoneCount") ? val("autoZoneCount") : "1";
-  const maxPractical = Math.max(75, num("autoMaxSpacing") || 450);
-  const primarySet = s.stirrupAvSet;
-  const dowel = rebar(r.inputs.dowelBar);
-  const preferredDowelLegs = Math.max(4, Math.round(r.inputs.dowelLegs || 4));
-  const dowelSet = preferredDowelLegs * dowel.area;
-  let newPrimarySpacing = r.inputs.stirrupSpacing;
-  let newDowelLegs = r.inputs.dowelLegs;
-  let newDowelSpacing = r.inputs.dowelSpacing;
-  let message = "";
+  const maxPractical = Math.max(75, num("autoMaxSpacing") || r.inputs.zoneMaxSpacing || 450);
+  const zoneStrategy = strategy === "addDowels" ? "addDowels" : "primaryFirst";
 
-  const minSteelSpacingLimit = primarySet > 0 ? primarySet * Math.max(1, r.inputs.fy) / Math.max(1, 0.06 * Math.sqrt(Math.max(0, r.inputs.fc)) * r.section.b) : 75;
+  const sim = {
+    ...r,
+    inputs: {
+      ...r.inputs,
+      zoneDesignMode: concept === "uniform" ? "uniform" : "zoned",
+      zoneDesignStrategy: zoneStrategy,
+      zoneMaxSpacing: maxPractical,
+      dowelLegs: strategy === "addDowels" && r.inputs.dowelLegs <= 0 ? 4 : r.inputs.dowelLegs
+    },
+    summary: { ...r.summary }
+  };
+  const dowel = rebar(sim.inputs.dowelBar);
+  sim.summary.dowelAvSet = sim.inputs.dowelLegs * dowel.area;
+  sim.summary.dowelAvPerM = sim.inputs.dowelSpacing > 0 ? sim.summary.dowelAvSet / sim.inputs.dowelSpacing * 1000 : 0;
+  sim.summary.zoneSchedule = computeZoneSchedule(sim);
+  Object.assign(sim.summary, evaluateZoneScheduleUtilization(sim));
 
-  if (strategy === "primaryOnly") {
-    const totalReq = r.inputs.allocation === "balance" ? s.interfaceAvReqPerM + s.beamAvReqPerM : s.interfaceAvReqPerM;
-    const spacingLimit = Math.min(maxPractical, s.sMax, minSteelSpacingLimit, primarySet * 1000 / Math.max(1, totalReq));
-    newPrimarySpacing = niceSpacing(spacingLimit);
-    newDowelLegs = 0;
-    newDowelSpacing = r.inputs.dowelSpacing;
-    message = `Primary-only proposal: ${fmt(r.inputs.stirrupLegs,0)} legs ${r.inputs.stirrupBar} @ ${newPrimarySpacing} mm. Additional dowels set to 0.`;
-  } else if (strategy === "addDowels") {
-    const deficit = Math.max(0, s.interfaceAvReqPerM - s.unusedStirrupAv);
-    if (deficit <= 0) {
-      newDowelLegs = 0;
-      message = `Existing primary detail has enough interface balance. No added dowels required by the selected method.`;
-    } else {
-      newDowelLegs = preferredDowelLegs;
-      newDowelSpacing = niceSpacing(Math.min(maxPractical, dowelSet * 1000 / deficit));
-      message = `Added-dowel proposal: keep primary @ ${fmt(r.inputs.stirrupSpacing,0)} mm; add ${newDowelLegs} legs ${r.inputs.dowelBar} @ ${newDowelSpacing} mm.`;
-    }
-  } else {
-    newPrimarySpacing = niceSpacing(Math.min(maxPractical, s.sMax, minSteelSpacingLimit, r.inputs.stirrupSpacing));
-    const newPrimaryPerM = primarySet / Math.max(1, newPrimarySpacing) * 1000;
-    const unused = r.inputs.allocation === "balance" ? Math.max(0, newPrimaryPerM - s.beamAvReqPerM) : newPrimaryPerM;
-    const deficit = Math.max(0, s.interfaceAvReqPerM - unused);
-    if (deficit <= 0) {
-      newDowelLegs = 0;
-      message = `Hybrid proposal: tighten primary to ${fmt(r.inputs.stirrupLegs,0)} legs ${r.inputs.stirrupBar} @ ${newPrimarySpacing} mm. No added dowels required.`;
-    } else {
-      newDowelLegs = preferredDowelLegs;
-      newDowelSpacing = niceSpacing(Math.min(maxPractical, dowelSet * 1000 / deficit));
-      message = `Hybrid proposal: primary @ ${newPrimarySpacing} mm plus ${newDowelLegs} legs ${r.inputs.dowelBar} @ ${newDowelSpacing} mm.`;
-    }
-  }
+  const zones = sim.summary.zoneSchedule || [];
+  const minPrimary = zones.length ? Math.min(...zones.map(z => z.primarySpacing || sim.inputs.stirrupSpacing)) : sim.inputs.stirrupSpacing;
+  const needsDowels = zones.some(z => z.dowelSpacing);
+  const maxUtil = sim.summary.zoneCombinedShearRatio;
+  const zoneText = concept === "uniform" ? "uniform" : "zoned";
+  const message = `${zoneText} proposal: ${fmt(sim.inputs.stirrupLegs,0)} legs ${sim.inputs.stirrupBar}; tightest primary spacing ${fmt(minPrimary,0)} mm; ${needsDowels ? `added ${fmt(sim.inputs.dowelLegs,0)} legs ${sim.inputs.dowelBar} where required` : "no added dowels required"}. Max shear utilization ${fmt(maxUtil,2)}.`;
 
-  const zoneNote = zones === "3" ? " Zone concept: support zones A use this selected detail; zone B can be relaxed after checking the local station envelope." : " Uniform detail is applied for the whole member in the current input model.";
-  if ($("autoDesignResult")) $("autoDesignResult").textContent = message + zoneNote;
+  if ($("autoDesignResult")) $("autoDesignResult").textContent = message;
 
   if (apply) {
-    $("stirrupSpacing").value = newPrimarySpacing;
-    $("dowelLegs").value = newDowelLegs;
-    $("dowelSpacing").value = newDowelSpacing;
+    $("zoneDesignMode").value = sim.inputs.zoneDesignMode;
+    $("zoneDesignStrategy").value = sim.inputs.zoneDesignStrategy;
+    $("zoneMaxSpacing").value = maxPractical;
+    $("stirrupSpacing").value = minPrimary;
+    if (needsDowels && sim.inputs.dowelLegs > 0) {
+      $("dowelLegs").value = sim.inputs.dowelLegs;
+      const firstDowelZone = zones.find(z => z.dowelSpacing);
+      if (firstDowelZone) $("dowelSpacing").value = firstDowelZone.dowelSpacing;
+    } else {
+      $("dowelLegs").value = 0;
+    }
+    updateConditionalInputs();
     runCalculations();
-    if ($("autoDesignResult")) $("autoDesignResult").textContent = "Applied: " + message + zoneNote;
+    if ($("autoDesignResult")) $("autoDesignResult").textContent = "Applied: " + message;
   }
 }
-
-
 function setStationFromClientX(clientX) {
   if (!lastResult) return;
   const host = $("beamElevation");

@@ -168,9 +168,8 @@
         <div class="grid two">
           <label>Zone design mode
             <select id="zoneDesignMode">
-              <option value="auto" selected>Auto-zone by demand envelope</option>
+              <option value="zoned" selected>Zoned by demand envelope</option>
               <option value="uniform">Uniform selected spacing</option>
-              <option value="manual">Manual support-zone length</option>
             </select>
           </label>
           <label>Zone design strategy
@@ -185,14 +184,11 @@
           <label>Maximum practical spacing, mm
             <input id="zoneMaxSpacing" type="number" step="25" value="450" />
           </label>
-          <label>Maximum auto zone count
+          <label>Maximum zone count
             <input id="zoneMaxCount" type="number" min="1" max="9" step="1" value="5" />
           </label>
-          <label>Minimum zone length, m
-            <input id="zoneMinLength" type="number" min="0" step="0.25" value="1.0" />
-          </label>
-          <label>Manual support zone length, m
-            <input id="manualSupportZoneLength" type="number" min="0" step="0.25" value="3.0" />
+          <label>Minimum zone length, m <span class="input-hint">min. 2d used</span>
+            <input id="zoneMinLength" type="number" min="0" step="0.25" value="0" />
           </label>
         </div>
       </details>
@@ -209,15 +205,15 @@
         </div>
         <label>Shear-zone concept
           <select id="autoZoneCount">
-            <option value="1">1 zone: uniform detail</option>
-            <option value="3" selected>3 zones: A / B / A support-zone concept</option>
+            <option value="uniform">Uniform</option>
+            <option value="zoned" selected>Zoned</option>
           </select>
         </label>
         <label>Design strategy
           <select id="autoStrategy">
-            <option value="primaryOnly" selected>Use primary stirrups only</option>
+            <option value="primaryOnly" selected>Use primary stirrups first</option>
             <option value="addDowels">Keep primary spacing + add dowels</option>
-            <option value="hybrid">Tighten primary to spacing limit + add dowels if needed</option>
+            <option value="hybrid">Tighten primary + add dowels if needed</option>
           </select>
         </label>
         <label>Maximum practical spacing, mm

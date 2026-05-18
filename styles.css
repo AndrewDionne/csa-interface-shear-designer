@@ -822,3 +822,19 @@ label[hidden] {
 .beam-slider-overlay input[type=range]:active {
   cursor: grabbing;
 }
+
+/* v12 zone schedule refinements */
+.input-hint {
+  display: block;
+  color: var(--muted);
+  font-weight: 650;
+  font-size: 0.68rem;
+  line-height: 1.15;
+}
+.zone-table td:nth-child(2) {
+  min-width: 135px;
+}
+.zone-table td:nth-child(9),
+.zone-table th:nth-child(9) {
+  text-align: right;
+}

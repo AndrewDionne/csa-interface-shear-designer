@@ -68,6 +68,10 @@ function fmt(value, digits = 2) {
   return value.toLocaleString(undefined, { maximumFractionDigits: digits });
 }
 
+function clamp(value, min, max) {
+  return Math.min(Math.max(value, min), max);
+}
+
 function rebar(size) {
   return REBAR.find(r => r.size === size) || REBAR[0];
 }
@@ -498,59 +502,74 @@ function scaleX(x, L, left, width) {
 }
 
 function renderElevation(r) {
-  const width = 920, height = 260, left = 55, right = 35, beamY = 135, beamH = 34;
+  const width = 980, height = 330, left = 78, right = 42;
   const L = beamLength(r.inputs);
   const plotW = width - left - right;
   const supports = supportLocations(r.inputs);
   const xP = r.inputs.Px;
   const includeP = r.inputs.includePoint && r.inputs.Pf !== 0;
+
+  // Draw the elevation depth roughly to span scale. Cap the pixel height so very deep or very short beams stay legible.
+  const pxPerMmAlongSpan = plotW / Math.max(1, L * 1000);
+  const totalBeamH = clamp(r.inputs.h * pxPerMmAlongSpan, 38, 115);
+  const slabH = clamp(r.inputs.slabDepth * pxPerMmAlongSpan, 9, totalBeamH - 12);
+  const webH = Math.max(20, totalBeamH - slabH);
+  const topY = 112;
+  const jointY = topY + slabH;
+  const bottomY = topY + totalBeamH;
+  const supportBaseY = bottomY + 52;
+
   let arrows = "";
   const nArrows = 14;
   if (r.inputs.Wf !== 0) {
     for (let i = 0; i <= nArrows; i++) {
       const x = left + plotW * i / nArrows;
-      arrows += `<line x1="${x}" y1="42" x2="${x}" y2="${beamY - 8}" stroke="#1f6feb" stroke-width="2" marker-end="url(#arrowBlue)"/>`;
+      arrows += `<line x1="${x}" y1="32" x2="${x}" y2="${topY - 6}" stroke="#1f6feb" stroke-width="2" marker-end="url(#arrowBlue)"/>`;
     }
   }
 
   const supportSvg = supports.map((sx, i) => {
     const x = scaleX(sx, L, left, plotW);
     if (r.inputs.beamSystem === "cantilever" && i === 0) {
-      return `<rect x="${x - 12}" y="${beamY - 24}" width="24" height="82" fill="#d9e2ec" stroke="#334e68"/>
-              ${Array.from({ length: 6 }, (_, j) => `<line x1="${x - 18}" y1="${beamY - 18 + j*13}" x2="${x - 34}" y2="${beamY - 8 + j*13}" stroke="#8091a5"/>`).join("")}`;
+      return `<rect x="${x - 12}" y="${topY - 18}" width="24" height="${totalBeamH + 44}" fill="#d9e2ec" stroke="#334e68"/>
+              ${Array.from({ length: 7 }, (_, j) => `<line x1="${x - 18}" y1="${topY - 12 + j*14}" x2="${x - 36}" y2="${topY - 2 + j*14}" stroke="#8091a5"/>`).join("")}`;
     }
-    return `<polygon points="${x},${beamY + beamH + 2} ${x - 18},${beamY + beamH + 34} ${x + 18},${beamY + beamH + 34}" fill="#d9e2ec" stroke="#334e68"/>
-            <line x1="${x - 28}" y1="${beamY + beamH + 34}" x2="${x + 28}" y2="${beamY + beamH + 34}" stroke="#334e68"/>`;
+    return `<polygon points="${x},${bottomY + 4} ${x - 18},${bottomY + 36} ${x + 18},${bottomY + 36}" fill="#d9e2ec" stroke="#334e68"/>
+            <line x1="${x - 28}" y1="${bottomY + 36}" x2="${x + 28}" y2="${bottomY + 36}" stroke="#334e68"/>`;
   }).join("");
 
   const pointSvg = includeP ? (() => {
     const x = scaleX(xP, L, left, plotW);
-    return `<line x1="${x}" y1="22" x2="${x}" y2="${beamY - 12}" stroke="#b3261e" stroke-width="4" marker-end="url(#arrowRed)"/>
-            <text x="${x + 8}" y="31" fill="#b3261e" font-size="13" font-weight="800">Pf=${fmt(r.inputs.Pf, 0)} kN @ x=${fmt(xP, 2)} m</text>`;
+    return `<line x1="${x}" y1="18" x2="${x}" y2="${topY - 9}" stroke="#b3261e" stroke-width="4" marker-end="url(#arrowRed)"/>
+            <text x="${x + 8}" y="28" fill="#b3261e" font-size="13" font-weight="800">Pf=${fmt(r.inputs.Pf, 0)} kN @ x=${fmt(xP, 2)} m</text>`;
   })() : "";
 
   const spanLabels = r.inputs.beamSystem === "twoSpan"
-    ? `<text x="${scaleX(r.inputs.L1/2, L, left, plotW)}" y="${height-22}" text-anchor="middle" font-size="13">L1=${fmt(r.inputs.L1,2)} m</text>
-       <text x="${scaleX(r.inputs.L1 + r.inputs.L2/2, L, left, plotW)}" y="${height-22}" text-anchor="middle" font-size="13">L2=${fmt(r.inputs.L2,2)} m</text>`
-    : `<text x="${left + plotW/2}" y="${height-22}" text-anchor="middle" font-size="13">L=${fmt(r.inputs.L1,2)} m</text>`;
+    ? `<text x="${scaleX(r.inputs.L1/2, L, left, plotW)}" y="${height-24}" text-anchor="middle" font-size="13">L1=${fmt(r.inputs.L1,2)} m</text>
+       <text x="${scaleX(r.inputs.L1 + r.inputs.L2/2, L, left, plotW)}" y="${height-24}" text-anchor="middle" font-size="13">L2=${fmt(r.inputs.L2,2)} m</text>`
+    : `<text x="${left + plotW/2}" y="${height-24}" text-anchor="middle" font-size="13">L=${fmt(r.inputs.L1,2)} m</text>`;
 
   $("beamElevation").innerHTML = `<svg viewBox="0 0 ${width} ${height}" role="img" aria-label="Beam elevation">
     <defs>
       <marker id="arrowBlue" markerWidth="8" markerHeight="8" refX="4" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 Z" fill="#1f6feb"/></marker>
       <marker id="arrowRed" markerWidth="8" markerHeight="8" refX="4" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 Z" fill="#b3261e"/></marker>
     </defs>
-    <rect x="${left}" y="${beamY}" width="${plotW}" height="${beamH}" rx="7" fill="#e8edf3" stroke="#5f6f82"/>
-    <rect x="${left}" y="${beamY - 28}" width="${plotW}" height="28" rx="4" fill="#dce9f8" stroke="#5f6f82"/>
-    <line x1="${left}" y1="${beamY}" x2="${left + plotW}" y2="${beamY}" stroke="#b26a00" stroke-width="3" stroke-dasharray="8 6"/>
-    <text x="${left + 8}" y="${beamY - 9}" font-size="12" font-weight="800" fill="#6b4600">cold joint / roughened interface</text>
+    <text x="${left}" y="20" font-size="14" font-weight="800">Elevation: ${labelBeamSystem(r.inputs.beamSystem)}</text>
+    <text x="${left}" y="39" font-size="12" fill="#667587">Wf=${fmt(r.inputs.Wf,1)} kN/m</text>
     ${arrows}
     ${pointSvg}
+    <rect x="${left}" y="${topY}" width="${plotW}" height="${slabH}" rx="5" fill="#dce9f8" stroke="#5f6f82"/>
+    <rect x="${left}" y="${jointY}" width="${plotW}" height="${webH}" rx="5" fill="#e8edf3" stroke="#5f6f82"/>
+    <line x1="${left}" y1="${jointY}" x2="${left + plotW}" y2="${jointY}" stroke="#b26a00" stroke-width="3" stroke-dasharray="8 6"/>
+    <text x="${left + 8}" y="${jointY - 7}" font-size="12" font-weight="800" fill="#6b4600">cold joint / roughened interface</text>
     ${supportSvg}
-    <text x="${left}" y="24" font-size="14" font-weight="800">Elevation: ${labelBeamSystem(r.inputs.beamSystem)}</text>
-    <text x="${left}" y="44" font-size="12" fill="#667587">Wf=${fmt(r.inputs.Wf,1)} kN/m</text>
-    <line x1="${left}" y1="${height-42}" x2="${left + plotW}" y2="${height-42}" stroke="#8091a5"/>
-    <line x1="${left}" y1="${height-49}" x2="${left}" y2="${height-35}" stroke="#8091a5"/>
-    <line x1="${left + plotW}" y1="${height-49}" x2="${left + plotW}" y2="${height-35}" stroke="#8091a5"/>
+    <line x1="${left - 30}" y1="${topY}" x2="${left - 30}" y2="${bottomY}" stroke="#8091a5"/>
+    <line x1="${left - 38}" y1="${topY}" x2="${left - 22}" y2="${topY}" stroke="#8091a5"/>
+    <line x1="${left - 38}" y1="${bottomY}" x2="${left - 22}" y2="${bottomY}" stroke="#8091a5"/>
+    <text x="${left - 45}" y="${topY + totalBeamH/2}" transform="rotate(-90 ${left - 45} ${topY + totalBeamH/2})" font-size="13" text-anchor="middle">h=${fmt(r.inputs.h,0)} mm</text>
+    <line x1="${left}" y1="${height-45}" x2="${left + plotW}" y2="${height-45}" stroke="#8091a5"/>
+    <line x1="${left}" y1="${height-52}" x2="${left}" y2="${height-38}" stroke="#8091a5"/>
+    <line x1="${left + plotW}" y1="${height-52}" x2="${left + plotW}" y2="${height-38}" stroke="#8091a5"/>
     ${spanLabels}
   </svg>`;
 }
@@ -563,62 +582,64 @@ function labelBeamSystem(system) {
 }
 
 function renderCrossSection(r) {
-  const w = 760, hSvg = 350;
-  const secW = 310;
-  const secH = 265;
-  const x0 = 78, y0 = 54;
+  const w = 430, hSvg = 310;
+  const secW = 182;
+  const secH = 230;
+  const x0 = 42, y0 = 52;
   const slabRatio = r.section.slabDepth / r.section.h;
   const slabH = secH * slabRatio;
-  const bottomY = y0 + secH - 30;
+  const bottomY = y0 + secH - 22;
   const mainCountVisible = Math.min(14, Math.max(1, Math.round(r.inputs.mainCount)));
   const cols = Math.min(7, mainCountVisible);
-  const rows = Math.ceil(mainCountVisible / cols);
   let bars = "";
   for (let i = 0; i < mainCountVisible; i++) {
     const row = Math.floor(i / cols);
     const col = i % cols;
-    const bx = x0 + 38 + col * ((secW - 76) / Math.max(1, cols - 1));
-    const by = bottomY - row * 22;
-    bars += `<circle cx="${bx}" cy="${by}" r="7" fill="#1f2937"/>`;
+    const bx = x0 + 28 + col * ((secW - 56) / Math.max(1, cols - 1));
+    const by = bottomY - row * 18;
+    bars += `<circle cx="${bx}" cy="${by}" r="5.6" fill="#1f2937"/>`;
   }
 
   const stirrupLegs = Math.max(0, Math.round(r.inputs.stirrupLegs));
   let legs = "";
   const nLegs = Math.min(12, stirrupLegs);
   for (let i = 0; i < nLegs; i++) {
-    const lx = x0 + 24 + i * ((secW - 48) / Math.max(1, nLegs - 1));
-    legs += `<line x1="${lx}" y1="${y0 + 14}" x2="${lx}" y2="${y0 + secH - 18}" stroke="#2a5caa" stroke-width="3.2" opacity="0.85"/>`;
+    const lx = x0 + 17 + i * ((secW - 34) / Math.max(1, nLegs - 1));
+    legs += `<line x1="${lx}" y1="${y0 + 13}" x2="${lx}" y2="${y0 + secH - 15}" stroke="#2a5caa" stroke-width="2.5" opacity="0.85"/>`;
   }
 
   const dowelLegs = Math.max(0, Math.round(r.inputs.dowelLegs));
   let dowels = "";
-  const nDowels = Math.min(12, dowelLegs);
+  const nDowels = Math.min(10, dowelLegs);
   for (let i = 0; i < nDowels; i++) {
-    const dx = x0 + 32 + i * ((secW - 64) / Math.max(1, nDowels - 1));
-    dowels += `<path d="M${dx},${y0 + slabH - 42} V${y0 + slabH + 58} q0,12 12,12 h15" fill="none" stroke="#b3261e" stroke-width="3.4" stroke-linecap="round"/>`;
+    const dx = x0 + 25 + i * ((secW - 50) / Math.max(1, nDowels - 1));
+    dowels += `<path d="M${dx},${y0 + slabH - 35} V${y0 + slabH + 47} q0,10 10,10 h12" fill="none" stroke="#b3261e" stroke-width="2.8" stroke-linecap="round"/>`;
   }
 
-  const labelX = x0 + secW + 28;
+  const labelX = x0 + secW + 16;
 
   $("crossSection").innerHTML = `<svg viewBox="0 0 ${w} ${hSvg}" role="img" aria-label="Cross-section reinforcement">
-    <rect x="${x0}" y="${y0}" width="${secW}" height="${secH}" fill="#edf2f7" stroke="#4a5568" stroke-width="2"/>
-    <rect x="${x0}" y="${y0}" width="${secW}" height="${slabH}" fill="#dce9f8" stroke="#4a5568" stroke-width="1.5"/>
-    <line x1="${x0}" y1="${y0 + slabH}" x2="${x0 + secW}" y2="${y0 + slabH}" stroke="#b26a00" stroke-width="3.5" stroke-dasharray="8 7"/>
+    <text x="${x0}" y="21" font-size="14" font-weight="850">Cross-section</text>
+    <text x="${x0}" y="38" font-size="11.5" fill="#2d3b4d">b=${fmt(r.inputs.b,0)} mm, h=${fmt(r.inputs.h,0)} mm</text>
+    <rect x="${x0}" y="${y0}" width="${secW}" height="${secH}" fill="#edf2f7" stroke="#4a5568" stroke-width="1.8"/>
+    <rect x="${x0}" y="${y0}" width="${secW}" height="${slabH}" fill="#dce9f8" stroke="#4a5568" stroke-width="1.2"/>
+    <line x1="${x0}" y1="${y0 + slabH}" x2="${x0 + secW}" y2="${y0 + slabH}" stroke="#b26a00" stroke-width="2.7" stroke-dasharray="7 6"/>
     ${legs}
-    <rect x="${x0 + 18}" y="${y0 + 16}" width="${secW - 36}" height="${secH - 32}" rx="12" fill="none" stroke="#2a5caa" stroke-width="3"/>
+    <rect x="${x0 + 13}" y="${y0 + 12}" width="${secW - 26}" height="${secH - 24}" rx="10" fill="none" stroke="#2a5caa" stroke-width="2.6"/>
     ${dowels}
     ${bars}
-    <text x="${x0}" y="30" font-size="17" font-weight="850">Cross-section: b=${fmt(r.inputs.b,0)} mm, h=${fmt(r.inputs.h,0)} mm</text>
-    <text x="${labelX}" y="${y0 + 22}" font-size="13" fill="#2d3b4d"><tspan font-weight="800">Second placement slab</tspan></text>
-    <text x="${labelX}" y="${y0 + 43}" font-size="12.5" fill="#667587">t=${fmt(r.inputs.slabDepth,0)} mm</text>
-    <text x="${labelX}" y="${y0 + slabH + 7}" font-size="13" fill="#6b4600" font-weight="800">roughened interface</text>
-    <text x="${labelX}" y="${y0 + slabH + 34}" font-size="13" fill="#2a5caa">Primary: ${fmt(r.inputs.stirrupLegs,0)} legs ${r.inputs.stirrupBar} @ ${fmt(r.inputs.stirrupSpacing,0)} mm</text>
-    <text x="${labelX}" y="${y0 + slabH + 58}" font-size="13" fill="#b3261e">Add: ${fmt(r.inputs.dowelLegs,0)} legs ${r.inputs.dowelBar} @ ${fmt(r.inputs.dowelSpacing,0)} mm</text>
-    <text x="${labelX}" y="${y0 + secH - 10}" font-size="13" fill="#1f2937">Bottom steel: ${fmt(r.inputs.mainCount,0)}-${r.inputs.mainBar}</text>
-    <line x1="${x0 - 24}" y1="${y0}" x2="${x0 - 24}" y2="${y0 + secH}" stroke="#8091a5"/>
-    <line x1="${x0 - 31}" y1="${y0}" x2="${x0 - 17}" y2="${y0}" stroke="#8091a5"/>
-    <line x1="${x0 - 31}" y1="${y0 + secH}" x2="${x0 - 17}" y2="${y0 + secH}" stroke="#8091a5"/>
-    <text x="${x0 - 35}" y="${y0 + secH/2}" transform="rotate(-90 ${x0 - 35} ${y0 + secH/2})" font-size="13" text-anchor="middle">h</text>
+    <text x="${labelX}" y="${y0 + 18}" font-size="11" fill="#2d3b4d"><tspan font-weight="800">Second slab</tspan></text>
+    <text x="${labelX}" y="${y0 + 34}" font-size="10.5" fill="#667587">t=${fmt(r.inputs.slabDepth,0)} mm</text>
+    <text x="${labelX}" y="${y0 + slabH + 6}" font-size="10.8" fill="#6b4600" font-weight="800">roughened interface</text>
+    <text x="${labelX}" y="${y0 + slabH + 29}" font-size="10.8" fill="#2a5caa">Primary: ${fmt(r.inputs.stirrupLegs,0)} legs</text>
+    <text x="${labelX}" y="${y0 + slabH + 44}" font-size="10.8" fill="#2a5caa">${r.inputs.stirrupBar} @ ${fmt(r.inputs.stirrupSpacing,0)} mm</text>
+    <text x="${labelX}" y="${y0 + slabH + 67}" font-size="10.8" fill="#b3261e">Add: ${fmt(r.inputs.dowelLegs,0)} legs</text>
+    <text x="${labelX}" y="${y0 + slabH + 82}" font-size="10.8" fill="#b3261e">${r.inputs.dowelBar} @ ${fmt(r.inputs.dowelSpacing,0)} mm</text>
+    <text x="${labelX}" y="${y0 + secH - 8}" font-size="10.8" fill="#1f2937">Bottom: ${fmt(r.inputs.mainCount,0)}-${r.inputs.mainBar}</text>
+    <line x1="${x0 - 20}" y1="${y0}" x2="${x0 - 20}" y2="${y0 + secH}" stroke="#8091a5"/>
+    <line x1="${x0 - 26}" y1="${y0}" x2="${x0 - 14}" y2="${y0}" stroke="#8091a5"/>
+    <line x1="${x0 - 26}" y1="${y0 + secH}" x2="${x0 - 14}" y2="${y0 + secH}" stroke="#8091a5"/>
+    <text x="${x0 - 30}" y="${y0 + secH/2}" transform="rotate(-90 ${x0 - 30} ${y0 + secH/2})" font-size="11" text-anchor="middle">h</text>
   </svg>`;
 }
 

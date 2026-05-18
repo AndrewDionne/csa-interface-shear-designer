@@ -45,6 +45,7 @@ const DEFAULTS = {
 };
 
 let lastResult = null;
+let selectedStationIndex = 0;
 
 function $(id) {
   return document.getElementById(id);
@@ -319,29 +320,32 @@ function computeSection(inputs) {
 function computeStationResults(inputs, section, fe) {
   const Ltotal = beamLength(inputs);
   const stations = fe.xs.map(x => {
+    // Plot and report internal actions just inside the member at the far end,
+    // so the right support reaction does not force the last shear point to zero.
+    const calcX = x >= Ltotal - 1e-9 ? Math.max(0, Ltotal - 1e-6) : x;
     let V = 0;
     let M = 0;
 
     fe.reactions.forEach(r => {
-      if (x + 1e-9 >= r.x) {
+      if (calcX + 1e-9 >= r.x) {
         V += r.vertical;
-        M += r.vertical * (x - r.x);
+        M += r.vertical * (calcX - r.x);
       }
     });
 
     // Include fixed-end support moments when present, chiefly for cantilever.
     fe.supportMoments.forEach(r => {
-      if (x + 1e-9 >= r.x) {
+      if (calcX + 1e-9 >= r.x) {
         M -= r.moment;
       }
     });
 
-    V -= inputs.Wf * x;
-    M -= inputs.Wf * x * x / 2;
+    V -= inputs.Wf * calcX;
+    M -= inputs.Wf * calcX * calcX / 2;
 
-    if (inputs.includePoint && inputs.Pf !== 0 && x + 1e-9 >= inputs.Px) {
+    if (inputs.includePoint && inputs.Pf !== 0 && calcX + 1e-9 >= inputs.Px) {
       V -= inputs.Pf;
-      M -= inputs.Pf * (x - inputs.Px);
+      M -= inputs.Pf * (calcX - inputs.Px);
     }
 
     const qElastic = Math.abs(V) * 1000 * section.Q / section.Ig; // N/mm = kN/m
@@ -429,12 +433,12 @@ function runCalculations() {
   const interfaceShearRatio = maxStress / Math.max(1e-9, interfaceStressResistance);
   const flexRatio = maxMabs / Math.max(1e-9, flex.Mr);
   const combinedShearRatio = beamShearRatio + interfaceShearRatio;
-  const combinedUtilization = flexRatio + combinedShearRatio;
-  const combinedOk = combinedUtilization <= 1.0;
+  const shearUtilizationOk = combinedShearRatio <= 1.0;
+  const flexUtilizationOk = flexRatio <= 1.0;
 
   const result = {
     inputs, section, fe, stations,
-    summary: { maxV, maxMpos, maxMneg, maxMabs, maxQ, maxStress, Vc, Vs, Vr, VrMax, beta, thetaDeg, cotTheta, beamAvReqPerM: beamAvReqPerM2, highShearThreshold, sMax, AvMin, stirrupAvSet, stirrupAvPerM, dowelAvSet, dowelAvPerM, rhoReq, interfaceAvReqPerM, concreteLimit, unusedStirrupAv, additionalInterfaceReq, totalInterfaceAvailable, interfaceStressResistanceRaw, interfaceStressResistance, beamShearRatio, interfaceShearRatio, flexRatio, combinedShearRatio, combinedUtilization, combinedOk, verticalStrengthOk, verticalSpacingOk, minSteelOk, interfaceOk, flex }
+    summary: { maxV, maxMpos, maxMneg, maxMabs, maxQ, maxStress, Vc, Vs, Vr, VrMax, beta, thetaDeg, cotTheta, beamAvReqPerM: beamAvReqPerM2, highShearThreshold, sMax, AvMin, stirrupAvSet, stirrupAvPerM, dowelAvSet, dowelAvPerM, rhoReq, interfaceAvReqPerM, concreteLimit, unusedStirrupAv, additionalInterfaceReq, totalInterfaceAvailable, interfaceStressResistanceRaw, interfaceStressResistance, beamShearRatio, interfaceShearRatio, flexRatio, combinedShearRatio, shearUtilizationOk, flexUtilizationOk, verticalStrengthOk, verticalSpacingOk, minSteelOk, interfaceOk, flex }
   };
 
   lastResult = result;
@@ -454,16 +458,20 @@ function computeFlexuralEstimate(inputs, section, maxMabs) {
 function render(result) {
   renderSummary(result);
   renderChecks(result);
+  updateStationControls(result);
   renderElevation(result);
   renderCrossSection(result);
   renderCharts(result);
   renderTable(result);
+  renderStationReadout(result);
 
-  const ok = result.summary.verticalStrengthOk && result.summary.verticalSpacingOk && result.summary.minSteelOk && result.summary.interfaceOk && result.summary.flex.ok && result.summary.combinedOk;
+  const ok = result.summary.verticalStrengthOk && result.summary.verticalSpacingOk && result.summary.minSteelOk && result.summary.interfaceOk && result.summary.flexUtilizationOk && result.summary.shearUtilizationOk;
   const hasWarning = !result.summary.flex.ok;
   const status = $("overallStatus");
-  status.className = "status-chip " + (ok ? "ok" : hasWarning ? "warn" : "ng");
-  status.textContent = ok ? "OK" : hasWarning ? "Review" : "NG";
+  if (status) {
+    status.className = "status-chip " + (ok ? "ok" : hasWarning ? "warn" : "ng");
+    status.textContent = ok ? "OK" : hasWarning ? "Review" : "NG";
+  }
 }
 
 function card(label, value, note = "") {
@@ -482,17 +490,77 @@ function demandModelLabel(value) {
   return "max(elastic, cracked)";
 }
 
+function activeStation(r) {
+  if (!r || !r.stations.length) return null;
+  selectedStationIndex = clamp(Math.round(selectedStationIndex), 0, r.stations.length - 1);
+  return r.stations[selectedStationIndex];
+}
+
+function stationZone(r, station) {
+  if (!station) return "B";
+  return Math.abs(station.V) > r.summary.highShearThreshold ? "A" : "B";
+}
+
+function localDesignForStation(r, station) {
+  const s = r.summary;
+  const beamAvReqPerMm = Math.max(0, (Math.abs(station.V) - s.Vc) * 1000 / (r.inputs.phiS * r.inputs.fy * r.section.dv * s.cotTheta));
+  const beamAvReqPerM = beamAvReqPerMm * 1000;
+  const rhoReq = Math.max(0, (Math.abs(station.vInterface) / (r.inputs.lambda * r.inputs.phiC) - r.inputs.cohesion) / Math.max(1e-9, r.inputs.mu * r.inputs.fy));
+  const interfaceAvReqPerM = rhoReq * r.section.b * 1000;
+  const unusedStirrupAv = r.inputs.allocation === "balance"
+    ? Math.max(0, s.stirrupAvPerM - beamAvReqPerM)
+    : s.stirrupAvPerM;
+  const addReq = Math.max(0, interfaceAvReqPerM - unusedStirrupAv);
+  const totalAvailable = unusedStirrupAv + s.dowelAvPerM;
+  const interfaceResistance = Math.min(s.concreteLimit, s.interfaceStressResistanceRaw);
+  const beamRatio = Math.abs(station.V) / Math.max(1e-9, s.Vr);
+  const interfaceRatio = Math.abs(station.vInterface) / Math.max(1e-9, interfaceResistance);
+  const shearRatio = beamRatio + interfaceRatio;
+  const flexRatio = Math.abs(station.M) / Math.max(1e-9, s.flex.Mr);
+  return { beamAvReqPerM, interfaceAvReqPerM, unusedStirrupAv, addReq, totalAvailable, beamRatio, interfaceRatio, shearRatio, flexRatio, zone: stationZone(r, station) };
+}
+
+function updateStationControls(r) {
+  const slider = $("stationSlider");
+  if (!slider || !r || !r.stations.length) return;
+  const oldX = activeStation(r)?.x;
+  selectedStationIndex = clamp(selectedStationIndex, 0, r.stations.length - 1);
+  if (oldX !== undefined && Number.isFinite(oldX)) {
+    let closest = 0;
+    for (let i = 1; i < r.stations.length; i++) {
+      if (Math.abs(r.stations[i].x - oldX) < Math.abs(r.stations[closest].x - oldX)) closest = i;
+    }
+    selectedStationIndex = closest;
+  }
+  slider.max = String(r.stations.length - 1);
+  slider.value = String(selectedStationIndex);
+}
+
+function renderStationReadout(r) {
+  const el = $("stationReadout");
+  if (!el || !r) return;
+  const st = activeStation(r);
+  if (!st) return;
+  const local = localDesignForStation(r, st);
+  const zoneCls = local.zone === "A" ? "zone-a" : "zone-b";
+  el.innerHTML = `<strong>x=${fmt(st.x, 3)} m</strong> · <span class="${zoneCls}">Shear zone ${local.zone}</span><br>` +
+    `Vf=${fmt(st.V, 1)} kN · Mf=${fmt(st.M, 1)} kN·m · q=${fmt(st.qDesign, 1)} kN/m · v=${fmt(st.vInterface, 3)} MPa<br>` +
+    `Local utilization: Mf/Mr=${fmt(local.flexRatio, 2)} · Vf/Vr=${fmt(local.shearRatio, 2)} ` +
+    `(beam ${fmt(local.beamRatio, 2)} + interface ${fmt(local.interfaceRatio, 2)})`;
+}
+
 function renderSummary(r) {
   const s = r.summary;
   const reactions = r.fe.reactions.map((rx, i) => `R${i + 1}=${fmt(rx.vertical, 0)}`).join(", ");
   $("summaryCards").innerHTML = [
     card("Max |Vf|", `${fmt(s.maxV, 0)} kN`, reactions),
-    card("Max Mf", `${fmt(s.maxMabs, 0)} kN·m`, `+${fmt(s.maxMpos, 0)}, hog ${fmt(s.maxMneg, 0)}`),
-    card("Max q + v", `${fmt(s.maxQ, 0)} kN/m · ${fmt(s.maxStress, 3)} MPa`, `${demandModelLabel(r.inputs.interfaceDemandModel)}`),
+    card("Max |Mf|", `${fmt(s.maxMabs, 0)} kN·m`, `+${fmt(s.maxMpos, 0)}, hog ${fmt(s.maxMneg, 0)}`),
+    card("Max q + v", `${fmt(s.maxQ, 0)} kN/m · ${fmt(s.maxStress, 3)} MPa`, demandModelLabel(r.inputs.interfaceDemandModel)),
     card("dv / d", `${fmt(r.section.dv, 0)} / ${fmt(r.section.d, 0)} mm`, `z=${fmt(r.section.z, 0)} mm`),
     card("Beam shear steel", `${fmt(s.beamAvReqPerM, 0)} mm²/m`, `Vc=${fmt(s.Vc, 0)} kN`),
-    card("Interface steel", `${fmt(s.interfaceAvReqPerM, 0)} req · ${fmt(s.additionalInterfaceReq, 0)} add`, `${interfaceConditionLabel(r.inputs.interfaceCondition)}`),
-    card("ULS utilization", `${fmt(s.combinedUtilization, 2)}`, `M/Mr=${fmt(s.flexRatio, 2)}; V/Vr=${fmt(s.beamShearRatio, 2)}+${fmt(s.interfaceShearRatio, 2)} ≤ 1.0`)
+    card("Interface steel", `${fmt(s.interfaceAvReqPerM, 0)} req · ${fmt(s.additionalInterfaceReq, 0)} add`, interfaceConditionLabel(r.inputs.interfaceCondition)),
+    card("Mf utilization", `${fmt(s.flexRatio, 2)}`, `Mf/Mr; Mr≈${fmt(s.flex.Mr,0)} kN·m`),
+    card("Vf utilization", `${fmt(s.combinedShearRatio, 2)}`, `beam ${fmt(s.beamShearRatio, 2)} + interface ${fmt(s.interfaceShearRatio, 2)}`)
   ].join("");
 }
 
@@ -515,8 +583,8 @@ function renderChecks(r) {
     checkCard("Minimum shear steel", s.minSteelOk, `Av=${fmt(s.stirrupAvSet, 0)} mm² ≥ Av,min=${fmt(s.AvMin, 0)} mm²`, `Minimum steel checked for selected primary stirrup spacing.`),
     checkCard("Interface shear", s.interfaceOk, `Available=${fmt(s.totalInterfaceAvailable, 0)} mm²/m ≥ Req=${fmt(s.interfaceAvReqPerM, 0)} mm²/m`, `Unused stirrup balance=${fmt(s.unusedStirrupAv, 0)} mm²/m; added dowels=${fmt(s.dowelAvPerM, 0)} mm²/m.`),
     checkCard("Interface concrete limit", s.maxStress <= s.concreteLimit, `v=${fmt(s.maxStress, 3)} MPa ≤ ${fmt(s.concreteLimit, 2)} MPa`, `CSA-style upper-bound check 0.25ϕc f'c.`),
-    checkCard("Flexural estimate", s.flex.ok, `Mr≈${fmt(s.flex.Mr, 0)} kN·m vs Mf=${fmt(s.maxMabs, 0)} kN·m`, `Approximate singly-reinforced rectangular stress-block estimate. c≈${fmt(s.flex.c, 0)} mm.`, true),
-    checkCard("Combined utilization", s.combinedOk, `M/Mr + V/Vr = ${fmt(s.combinedUtilization, 2)} ≤ 1.00`, `V/Vr is beam shear ${fmt(s.beamShearRatio, 2)} plus interface shear ${fmt(s.interfaceShearRatio, 2)}.`, true)
+    checkCard("Flexural utilization", s.flexUtilizationOk, `Mf/Mr = ${fmt(s.flexRatio, 2)} ≤ 1.00`, `Mr≈${fmt(s.flex.Mr, 0)} kN·m vs Mf=${fmt(s.maxMabs, 0)} kN·m. c≈${fmt(s.flex.c, 0)} mm.`, true),
+    checkCard("Shear utilization", s.shearUtilizationOk, `Vf/Vr = ${fmt(s.combinedShearRatio, 2)} ≤ 1.00`, `Beam shear ${fmt(s.beamShearRatio, 2)} plus interface shear ${fmt(s.interfaceShearRatio, 2)}.`, true)
   ].join("");
 }
 
@@ -649,12 +717,14 @@ function buildShearZones(r, left, plotW, L, y) {
 }
 
 function renderElevation(r) {
-  const width = 980, height = 640, left = 78, right = 42;
+  const width = 980, height = 660, left = 78, right = 42;
   const L = beamLength(r.inputs);
   const plotW = width - left - right;
   const supports = supportLocations(r.inputs);
   const xP = r.inputs.Px;
   const includeP = r.inputs.includePoint && r.inputs.Pf !== 0;
+  const st = activeStation(r);
+  const local = st ? localDesignForStation(r, st) : null;
 
   const pxPerMmAlongSpan = plotW / Math.max(1, L * 1000);
   const totalBeamH = clamp(r.inputs.h * pxPerMmAlongSpan, 42, 96);
@@ -697,9 +767,17 @@ function renderElevation(r) {
     : `<text x="${left + plotW/2}" y="${bottomY + 67}" text-anchor="middle" font-size="12">L=${fmt(r.inputs.L1,2)} m</text>`;
 
   const diagramTop = Math.max(240, zoneY + 44);
-  const miniM = buildMiniDiagram(r, "M", "Mf diagram", "kN·m", diagramTop, left, plotW, 96, false, { positiveDown: true, bg: "#f7fbff" });
-  const miniV = buildMiniDiagram(r, "V", "Vf diagram", "kN", diagramTop + 122, left, plotW, 96, false, { bg: "#f7fafc" });
-  const miniInterface = buildMiniInterfaceDiagram(r, diagramTop + 244, left, plotW, 104);
+  const miniM = buildMiniDiagram(r, "M", "Mf diagram", "kN·m", diagramTop, left, plotW, 100, false, { positiveDown: true, bg: "#f7fbff" });
+  const miniV = buildMiniDiagram(r, "V", "Vf diagram", "kN", diagramTop + 126, left, plotW, 100, false, { bg: "#f7fafc" });
+  const miniInterface = buildMiniInterfaceDiagram(r, diagramTop + 252, left, plotW, 110);
+  const cursorX = st ? scaleX(st.x, L, left, plotW) : left;
+  const cursorBottom = diagramTop + 252 + 110;
+  const zoneText = local ? `zone ${local.zone}` : "";
+  const cursorSvg = st ? `
+    <line x1="${cursorX}" y1="${topY - 10}" x2="${cursorX}" y2="${cursorBottom}" stroke="#b3261e" stroke-width="1.6" stroke-dasharray="5 5"/>
+    <circle cx="${cursorX}" cy="${jointY}" r="4" fill="#b3261e"/>
+    <rect x="${Math.min(width - 178, Math.max(8, cursorX + 8))}" y="${diagramTop - 35}" width="170" height="28" rx="8" fill="#fff" stroke="#d0d7de"/>
+    <text x="${Math.min(width - 168, Math.max(18, cursorX + 18))}" y="${diagramTop - 17}" font-size="11" fill="#34495e">x=${fmt(st.x, 3)} m · ${zoneText}</text>` : "";
 
   $("beamElevation").innerHTML = `<svg viewBox="0 0 ${width} ${height}" role="img" aria-label="Beam elevation with aligned demand diagrams">
     <defs>
@@ -727,6 +805,7 @@ function renderElevation(r) {
     ${miniM}
     ${miniV}
     ${miniInterface}
+    ${cursorSvg}
   </svg>`;
 }
 
@@ -738,9 +817,11 @@ function labelBeamSystem(system) {
 }
 
 function renderCrossSection(r) {
-  const w = 330, hSvg = 360;
-  const x0 = 48, y0 = 62;
-  const maxW = 230, maxH = 185;
+  const w = 500, hSvg = 520;
+  const x0 = 82, y0 = 82;
+  const maxW = 345, maxH = 278;
+  const st = activeStation(r);
+  const local = st ? localDesignForStation(r, st) : null;
   const scale = Math.min(maxW / Math.max(1, r.inputs.b), maxH / Math.max(1, r.inputs.h));
   const secW = r.inputs.b * scale;
   const secH = r.inputs.h * scale;
@@ -748,9 +829,9 @@ function renderCrossSection(r) {
   const main = rebar(r.inputs.mainBar);
   const stirrup = rebar(r.inputs.stirrupBar);
   const dowel = rebar(r.inputs.dowelBar);
-  const mainR = Math.max(1.35, (main.diameter * scale) / 2);
-  const stirrupW = Math.max(1.05, stirrup.diameter * scale);
-  const dowelW = Math.max(1.05, dowel.diameter * scale);
+  const mainR = Math.max(2.0, (main.diameter * scale) / 2);
+  const stirrupW = Math.max(1.5, stirrup.diameter * scale);
+  const dowelW = Math.max(1.5, dowel.diameter * scale);
   const coverPx = Math.max(5, r.inputs.cover * scale);
   const innerX0 = x0 + coverPx + stirrupW;
   const innerX1 = x0 + secW - coverPx - stirrupW;
@@ -787,10 +868,13 @@ function renderCrossSection(r) {
     dowels += `<path d="M${dx},${y0 + slabH - 18} V${y0 + slabH + 44} q0,8 8,8 h10" fill="none" stroke="#b3261e" stroke-width="${dowelW}" stroke-linecap="round"/>`;
   }
 
-  const noteY = y0 + secH + 42;
+  const noteY = y0 + secH + 40;
+  const stationTitle = st ? `Station x=${fmt(st.x,3)} m · Shear zone ${local.zone}` : "Selected section";
+  const localLine = local ? `Local req: beam Av=${fmt(local.beamAvReqPerM,0)} mm²/m · interface Av=${fmt(local.interfaceAvReqPerM,0)} mm²/m · add=${fmt(local.addReq,0)} mm²/m` : "";
   $("crossSection").innerHTML = `<svg viewBox="0 0 ${w} ${hSvg}" role="img" aria-label="Cross-section reinforcement drawn to scale">
-    <text x="${x0}" y="22" font-size="14" font-weight="850">Cross-section</text>
-    <text x="${x0}" y="39" font-size="11" fill="#2d3b4d">b=${fmt(r.inputs.b,0)} mm, h=${fmt(r.inputs.h,0)} mm</text>
+    <text x="${x0}" y="24" font-size="17" font-weight="850">Cross-section</text>
+    <text x="${x0}" y="43" font-size="12" fill="#2d3b4d">${stationTitle}</text>
+    <text x="${x0}" y="59" font-size="11" fill="#667587">b=${fmt(r.inputs.b,0)} mm, h=${fmt(r.inputs.h,0)} mm</text>
     <rect x="${x0}" y="${y0}" width="${secW}" height="${secH}" fill="#edf2f7" stroke="#4a5568" stroke-width="1.6"/>
     <rect x="${x0}" y="${y0}" width="${secW}" height="${slabH}" fill="#dce9f8" stroke="#4a5568" stroke-width="1.0"/>
     <line x1="${x0}" y1="${y0 + slabH}" x2="${x0 + secW}" y2="${y0 + slabH}" stroke="#b26a00" stroke-width="2.4" stroke-dasharray="7 6"/>
@@ -806,10 +890,11 @@ function renderCrossSection(r) {
     <line x1="${x0 - 26}" y1="${y0}" x2="${x0 - 14}" y2="${y0}" stroke="#8091a5"/>
     <line x1="${x0 - 26}" y1="${y0 + secH}" x2="${x0 - 14}" y2="${y0 + secH}" stroke="#8091a5"/>
     <text x="${x0 - 30}" y="${y0 + secH/2}" transform="rotate(-90 ${x0 - 30} ${y0 + secH/2})" font-size="10.5" text-anchor="middle">h</text>
-    <text x="${x0}" y="${noteY}" font-size="10.5" fill="#2d3b4d"><tspan font-weight="800">Second slab:</tspan> t=${fmt(r.inputs.slabDepth,0)} mm · <tspan fill="#6b4600" font-weight="800">roughened interface</tspan></text>
-    <text x="${x0}" y="${noteY + 17}" font-size="10.5" fill="#2a5caa">Primary: ${fmt(r.inputs.stirrupLegs,0)} legs ${r.inputs.stirrupBar} @ ${fmt(r.inputs.stirrupSpacing,0)} mm</text>
-    <text x="${x0}" y="${noteY + 34}" font-size="10.5" fill="#b3261e">Add: ${fmt(r.inputs.dowelLegs,0)} legs ${r.inputs.dowelBar} @ ${fmt(r.inputs.dowelSpacing,0)} mm</text>
-    <text x="${x0}" y="${noteY + 51}" font-size="10.5" fill="#1f2937">Bottom: ${fmt(r.inputs.mainCount,0)}-${r.inputs.mainBar}; bar diameters shown to drawing scale</text>
+    <text x="${x0}" y="${noteY}" font-size="12" fill="#2d3b4d"><tspan font-weight="800">Second slab:</tspan> t=${fmt(r.inputs.slabDepth,0)} mm · <tspan fill="#6b4600" font-weight="800">roughened interface</tspan></text>
+    <text x="${x0}" y="${noteY + 21}" font-size="12" fill="#2a5caa">Primary: ${fmt(r.inputs.stirrupLegs,0)} legs ${r.inputs.stirrupBar} @ ${fmt(r.inputs.stirrupSpacing,0)} mm</text>
+    <text x="${x0}" y="${noteY + 42}" font-size="12" fill="#b3261e">Add: ${fmt(r.inputs.dowelLegs,0)} legs ${r.inputs.dowelBar} @ ${fmt(r.inputs.dowelSpacing,0)} mm</text>
+    <text x="${x0}" y="${noteY + 63}" font-size="12" fill="#1f2937">Bottom: ${fmt(r.inputs.mainCount,0)}-${r.inputs.mainBar}; bar diameters shown to drawing scale</text>
+    <text x="${x0}" y="${noteY + 84}" font-size="11" fill="#667587">${localLine}</text>
   </svg>`;
 }
 
@@ -945,6 +1030,7 @@ function previewAutoDesign(apply = false) {
     $("dowelLegs").value = newDowelLegs;
     $("dowelSpacing").value = newDowelSpacing;
     runCalculations();
+    if ($("autoDesignResult")) $("autoDesignResult").textContent = "Applied: " + message + zoneNote;
   }
 }
 
@@ -958,6 +1044,16 @@ function attachEvents() {
       if (el.type === "number") runCalculations();
     });
   });
+  if ($("stationSlider")) {
+    $("stationSlider").addEventListener("input", () => {
+      selectedStationIndex = parseInt($("stationSlider").value, 10) || 0;
+      if (lastResult) {
+        renderElevation(lastResult);
+        renderCrossSection(lastResult);
+        renderStationReadout(lastResult);
+      }
+    });
+  }
   $("runButton").addEventListener("click", runCalculations);
   $("resetDefaults").addEventListener("click", () => { applyDefaults(); runCalculations(); });
   $("downloadCsv").addEventListener("click", downloadCsv);

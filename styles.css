@@ -25,8 +25,8 @@ body {
 
 .app-header {
   display: grid;
-  grid-template-columns: 1fr minmax(260px, 360px);
-  gap: 24px;
+  grid-template-columns: 1fr;
+  gap: 16px;
   padding: 28px 34px;
   background: linear-gradient(135deg, #0e1f35 0%, #19385f 58%, #255b99 100%);
   color: white;
@@ -85,7 +85,7 @@ h3 { font-size: 0.92rem; margin-bottom: 8px; }
 
 .layout {
   display: grid;
-  grid-template-columns: 405px 1fr;
+  grid-template-columns: 500px 1fr;
   gap: 20px;
   padding: 22px;
 }
@@ -161,7 +161,7 @@ summary:hover {
 }
 
 .inputs-panel label {
-  grid-template-columns: minmax(132px, 1fr) minmax(116px, 150px);
+  grid-template-columns: minmax(170px, 1fr) minmax(190px, 220px);
   align-items: center;
   gap: 8px;
 }
@@ -328,12 +328,12 @@ input:focus, select:focus {
 }
 
 #crossSection {
-  min-height: 305px;
+  min-height: 450px;
 }
 
 #crossSection svg {
   width: 100%;
-  max-height: 310px;
+  max-height: 520px;
 }
 
 .charts {
@@ -481,7 +481,7 @@ code {
 }
 
 .summary-grid {
-  grid-template-columns: repeat(7, minmax(102px, 1fr));
+  grid-template-columns: repeat(8, minmax(92px, 1fr));
   gap: 7px;
 }
 
@@ -509,7 +509,7 @@ code {
 }
 
 .graphics-layout {
-  grid-template-columns: minmax(660px, 1fr) minmax(300px, 330px);
+  grid-template-columns: minmax(660px, 1fr) minmax(450px, 500px);
   align-items: stretch;
 }
 
@@ -549,4 +549,67 @@ code {
 
 .aligned-diagram-note {
   color: var(--muted);
+}
+
+
+/* v7 station scrubber and layout refinements */
+.station-scrubber {
+  display: grid;
+  grid-template-columns: minmax(320px, 1fr) minmax(300px, 430px);
+  gap: 12px;
+  align-items: stretch;
+  margin: -4px 0 12px;
+}
+
+.station-scrubber label {
+  display: grid;
+  grid-template-columns: 130px 1fr;
+  align-items: center;
+  gap: 10px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 10px 12px;
+  background: #fbfdff;
+}
+
+.station-scrubber input[type=range] {
+  padding: 0;
+}
+
+.station-readout {
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 10px 12px;
+  background: #fbfdff;
+  color: #26394d;
+  font-size: 0.82rem;
+  line-height: 1.35;
+}
+
+.station-readout strong { color: var(--ink); }
+.station-readout .zone-a { color: var(--bad); font-weight: 850; }
+.station-readout .zone-b { color: var(--warn); font-weight: 850; }
+
+#beamElevation svg {
+  max-height: 660px;
+}
+
+#crossSection {
+  min-height: 500px;
+}
+
+#crossSection svg {
+  max-height: 545px;
+}
+
+@media (max-width: 1400px) {
+  .layout { grid-template-columns: 460px 1fr; }
+  .inputs-panel label { grid-template-columns: minmax(155px, 1fr) minmax(170px, 205px); }
+  .summary-grid { grid-template-columns: repeat(4, minmax(135px, 1fr)); }
+  .graphics-layout { grid-template-columns: 1fr; }
+}
+
+@media (max-width: 900px) {
+  .station-scrubber { grid-template-columns: 1fr; }
+  .station-scrubber label { grid-template-columns: 1fr; }
 }

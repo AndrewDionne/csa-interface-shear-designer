@@ -13,10 +13,6 @@
       <h1>Cold Joint Interface Shear + Beam Shear Designer</h1>
       <p class="subhead">Static GitHub Pages app for transfer beams, two-span beams, cantilevers, and composite slab-on-beam cold-joint checks.</p>
     </div>
-    <div class="header-card">
-      <div class="status-chip" id="overallStatus">Run check</div>
-      <div class="small-muted">Not a sealed design. Verify against governing CSA A23.3 edition and project-specific detailing.</div>
-    </div>
   </header>
 
   <main class="layout">
@@ -212,7 +208,13 @@
       <section class="panel graphics-panel">
         <div class="panel-title">
           <h2>Beam graphical interface</h2>
-          <div class="small-muted">Demand diagrams are shaded to the zero axis and aligned with the beam.</div>
+          <div class="small-muted">Scrub along the beam to inspect local demands and section detail.</div>
+        </div>
+        <div class="station-scrubber">
+          <label for="stationSlider">Station along beam
+            <input id="stationSlider" type="range" min="0" max="0" step="1" value="0" />
+          </label>
+          <div id="stationReadout" class="station-readout">Run analysis to inspect a station.</div>
         </div>
         <div class="graphics-layout">
           <div id="beamElevation" class="svg-wrap elevation-wrap"></div>
@@ -251,9 +253,6 @@
     </section>
   </main>
 
-  <footer class="app-footer">
-    <p>Methodology notes are in <code>docs/methodology.md</code>. This tool intentionally avoids embedding CSA standard text. Confirm all coefficients, limits, development length, anchorage, load combinations, and detailing against the project’s governing CSA A23.3 edition.</p>
-  </footer>
 
   <script src="app.js"></script>
 </body>

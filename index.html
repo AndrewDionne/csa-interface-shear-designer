@@ -1,0 +1,240 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>CSA A23.3 Cold Joint Interface Shear Designer</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <header class="app-header">
+    <div>
+      <p class="eyebrow">CSA A23.3 workflow aid</p>
+      <h1>Cold Joint Interface Shear + Beam Shear Designer</h1>
+      <p class="subhead">Static GitHub Pages app for transfer beams, two-span beams, cantilevers, and composite slab-on-beam cold-joint checks.</p>
+    </div>
+    <div class="header-card">
+      <div class="status-chip" id="overallStatus">Run check</div>
+      <div class="small-muted">Not a sealed design. Verify against governing CSA A23.3 edition and project-specific detailing.</div>
+    </div>
+  </header>
+
+  <main class="layout">
+    <section class="panel inputs-panel">
+      <div class="panel-title">
+        <h2>Front-page inputs</h2>
+        <button class="ghost-button" id="resetDefaults">Reset defaults</button>
+      </div>
+
+      <details open>
+        <summary>Beam analysis</summary>
+        <div class="grid two">
+          <label>Beam system
+            <select id="beamSystem">
+              <option value="simple">Single-span simply supported</option>
+              <option value="twoSpan">Two-span continuous</option>
+              <option value="cantilever">Cantilever</option>
+            </select>
+          </label>
+          <label>Station count
+            <input id="stationCount" type="number" min="51" max="501" step="10" value="201" />
+          </label>
+          <label>Span L1, m
+            <input id="L1" type="number" step="0.1" value="16" />
+          </label>
+          <label>Span L2, m
+            <input id="L2" type="number" step="0.1" value="16" />
+          </label>
+          <label>Factored UDL Wf, kN/m
+            <input id="Wf" type="number" step="1" value="544" />
+          </label>
+          <label>Point load Pf, kN
+            <input id="Pf" type="number" step="1" value="0" />
+          </label>
+          <label>Point load x from left, m
+            <input id="Px" type="number" step="0.1" value="8" />
+          </label>
+          <label>Point load include?
+            <select id="includePoint">
+              <option value="yes">Yes</option>
+              <option value="no" selected>No</option>
+            </select>
+          </label>
+        </div>
+      </details>
+
+      <details open>
+        <summary>Section and material</summary>
+        <div class="grid two">
+          <label>Total depth h, mm
+            <input id="h" type="number" step="10" value="1800" />
+          </label>
+          <label>Beam/interface width b, mm
+            <input id="b" type="number" step="10" value="3000" />
+          </label>
+          <label>Second placement slab depth, mm
+            <input id="slabDepth" type="number" step="10" value="350" />
+          </label>
+          <label>Concrete strength f'c, MPa
+            <input id="fc" type="number" step="1" value="50" />
+          </label>
+          <label>Rebar yield fy, MPa
+            <input id="fy" type="number" step="10" value="400" />
+          </label>
+          <label>Concrete density factor λ
+            <input id="lambda" type="number" step="0.05" value="1.0" />
+          </label>
+          <label>ϕc
+            <input id="phiC" type="number" step="0.01" value="0.65" />
+          </label>
+          <label>ϕs
+            <input id="phiS" type="number" step="0.01" value="0.85" />
+          </label>
+          <label>Effective cover to stirrup, mm
+            <input id="cover" type="number" step="5" value="50" />
+          </label>
+          <label>Main bottom bar size
+            <select id="mainBar"></select>
+          </label>
+          <label>Main bottom bar count
+            <input id="mainCount" type="number" step="1" value="28" />
+          </label>
+          <label>Design shear method
+            <select id="shearMethod">
+              <option value="simplified" selected>Simplified CSA-style β = 0.18, θ = 35°</option>
+            </select>
+          </label>
+        </div>
+      </details>
+
+      <details open>
+        <summary>Interface shear-transfer assumptions</summary>
+        <div class="grid two">
+          <label>Interface condition
+            <select id="interfaceCondition">
+              <option value="roughened" selected>Clean + intentionally roughened</option>
+              <option value="clean">Clean, not intentionally roughened</option>
+              <option value="custom">Custom c and μ</option>
+            </select>
+          </label>
+          <label>Demand model
+            <select id="interfaceDemandModel">
+              <option value="elastic" selected>Elastic VQ/I</option>
+              <option value="cracked">Cracked force-flow V/z</option>
+              <option value="max">Envelope max(elastic, cracked)</option>
+            </select>
+          </label>
+          <label>Cohesion c, MPa
+            <input id="cohesion" type="number" step="0.01" value="0.50" />
+          </label>
+          <label>Friction coefficient μ
+            <input id="mu" type="number" step="0.05" value="1.00" />
+          </label>
+          <label>Compression block lever-arm factor z/d
+            <input id="zFactor" type="number" step="0.01" value="0.96" />
+          </label>
+          <label>Allocation method
+            <select id="allocation">
+              <option value="balance" selected>Subtract beam shear steel from available crossing steel</option>
+              <option value="independent">Allow full crossing steel for interface check</option>
+            </select>
+          </label>
+        </div>
+      </details>
+
+      <details open>
+        <summary>Design reinforcement</summary>
+        <div class="grid two">
+          <label>Primary stirrup bar
+            <select id="stirrupBar"></select>
+          </label>
+          <label>Primary stirrup legs crossing interface
+            <input id="stirrupLegs" type="number" min="0" step="1" value="8" />
+          </label>
+          <label>Primary stirrup spacing, mm
+            <input id="stirrupSpacing" type="number" step="25" value="450" />
+          </label>
+          <label>Additional dowel / hairpin bar
+            <select id="dowelBar"></select>
+          </label>
+          <label>Additional dowel legs crossing interface
+            <input id="dowelLegs" type="number" min="0" step="1" value="4" />
+          </label>
+          <label>Additional dowel spacing, mm
+            <input id="dowelSpacing" type="number" step="25" value="350" />
+          </label>
+        </div>
+      </details>
+
+      <button class="primary-button" id="runButton">Run analysis + design check</button>
+    </section>
+
+    <section class="main-results">
+      <section class="panel">
+        <div class="panel-title">
+          <h2>Demand summary</h2>
+          <div class="small-muted">Positive sagging moment is shown upward in the chart. Design uses max absolute envelopes.</div>
+        </div>
+        <div class="summary-grid" id="summaryCards"></div>
+      </section>
+
+      <section class="panel graphics-panel">
+        <div class="panel-title">
+          <h2>Beam graphical interface</h2>
+          <div class="small-muted">Elevation and cross-section update from selected design reinforcement.</div>
+        </div>
+        <div id="beamElevation" class="svg-wrap"></div>
+        <div id="crossSection" class="svg-wrap"></div>
+      </section>
+
+      <section class="panel charts-panel">
+        <div class="panel-title">
+          <h2>Demand diagrams</h2>
+          <div class="small-muted">M<sub>f</sub>, V<sub>f</sub>, q = VQ/I, and interface stress v.</div>
+        </div>
+        <div class="charts">
+          <div class="chart-card"><h3>Mf diagram, kN·m</h3><div id="momentChart"></div></div>
+          <div class="chart-card"><h3>Vf diagram, kN</h3><div id="shearChart"></div></div>
+          <div class="chart-card"><h3>VQ/I demand, kN/m</h3><div id="flowChart"></div></div>
+          <div class="chart-card"><h3>Interface stress, MPa</h3><div id="stressChart"></div></div>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-title">
+          <h2>Design checks</h2>
+          <div class="small-muted">Uses a conservative steel-allocation option to avoid double-counting stirrup steel.</div>
+        </div>
+        <div class="checks-grid" id="checksGrid"></div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-title">
+          <h2>Station table</h2>
+          <button class="ghost-button" id="downloadCsv">Download CSV</button>
+        </div>
+        <div class="table-wrap">
+          <table id="stationTable">
+            <thead>
+              <tr>
+                <th>x, m</th>
+                <th>Vf, kN</th>
+                <th>Mf, kN·m</th>
+                <th>q = VQ/I, kN/m</th>
+                <th>v, MPa</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </section>
+    </section>
+  </main>
+
+  <footer class="app-footer">
+    <p>Methodology notes are in <code>docs/methodology.md</code>. This tool intentionally avoids embedding CSA standard text. Confirm all coefficients, limits, development length, anchorage, load combinations, and detailing against the project’s governing CSA A23.3 edition.</p>
+  </footer>
+
+  <script src="app.js"></script>
+</body>
+</html>

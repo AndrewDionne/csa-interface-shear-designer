@@ -1374,6 +1374,10 @@ function reportTable(headers, rows) {
   return { type: "table", headers, rows };
 }
 
+function reportFigure(svg, caption = "") {
+  return { type: "figure", svg, caption };
+}
+
 function ffrac(num, den) {
   return `<span class="frac"><span>${num}</span><span>${den}</span></span>`;
 }
@@ -1393,6 +1397,99 @@ function maxStationByValue(r, fn) {
 function rangeText(ranges) {
   return (ranges || []).map(rg => `${fmt(rg.x1,2)}–${fmt(rg.x2,2)} m`).join("; ");
 }
+
+
+function sectionGeometryFigure(r) {
+  const i = r.inputs;
+  const sec = r.section;
+  const w = 470, h = 250;
+  const x0 = 80, y0 = 36, bw = 220, bh = 150;
+  const slabH = Math.max(18, bh * (sec.slabDepth / Math.max(1, i.h)));
+  const naY = y0 + bh / 2;
+  const slabCy = y0 + slabH / 2;
+  const qx = x0 + bw + 85;
+  const qy = y0 + slabCy + (naY - slabCy) / 2;
+  return `<svg viewBox="0 0 ${w} ${h}" role="img" aria-label="Section geometry sketch for interface shear calculations">
+    <rect x="${x0}" y="${y0}" width="${bw}" height="${slabH}" fill="#dce9f8" stroke="#49617c"/>
+    <rect x="${x0}" y="${y0 + slabH}" width="${bw}" height="${bh - slabH}" fill="#edf2f7" stroke="#49617c"/>
+    <line x1="${x0}" y1="${y0 + slabH}" x2="${x0 + bw}" y2="${y0 + slabH}" stroke="#b26a00" stroke-width="2.2" stroke-dasharray="7 5"/>
+    <line x1="${x0 - 28}" y1="${y0}" x2="${x0 - 28}" y2="${y0 + bh}" stroke="#8091a5"/>
+    <line x1="${x0 - 35}" y1="${y0}" x2="${x0 - 21}" y2="${y0}" stroke="#8091a5"/>
+    <line x1="${x0 - 35}" y1="${y0 + bh}" x2="${x0 - 21}" y2="${y0 + bh}" stroke="#8091a5"/>
+    <text x="${x0 - 42}" y="${y0 + bh/2}" transform="rotate(-90 ${x0 - 42} ${y0 + bh/2})" font-size="12" text-anchor="middle">h</text>
+    <line x1="${x0}" y1="${y0 - 18}" x2="${x0 + bw}" y2="${y0 - 18}" stroke="#8091a5"/>
+    <line x1="${x0}" y1="${y0 - 24}" x2="${x0}" y2="${y0 - 12}" stroke="#8091a5"/>
+    <line x1="${x0 + bw}" y1="${y0 - 24}" x2="${x0 + bw}" y2="${y0 - 12}" stroke="#8091a5"/>
+    <text x="${x0 + bw/2}" y="${y0 - 22}" font-size="12" text-anchor="middle">b</text>
+    <line x1="${x0 + bw + 15}" y1="${y0}" x2="${x0 + bw + 15}" y2="${y0 + slabH}" stroke="#8091a5"/>
+    <line x1="${x0 + bw + 9}" y1="${y0}" x2="${x0 + bw + 21}" y2="${y0}" stroke="#8091a5"/>
+    <line x1="${x0 + bw + 9}" y1="${y0 + slabH}" x2="${x0 + bw + 21}" y2="${y0 + slabH}" stroke="#8091a5"/>
+    <text x="${x0 + bw + 28}" y="${y0 + slabH/2}" font-size="12">t</text>
+    <line x1="${x0 - 8}" y1="${naY}" x2="${x0 + bw + 8}" y2="${naY}" stroke="#9b1c1c" stroke-dasharray="4 4"/>
+    <text x="${x0 + bw + 12}" y="${naY - 4}" font-size="11" fill="#9b1c1c">NA at ȳ = h/2</text>
+    <rect x="${x0 + 16}" y="${y0 + 10}" width="${bw - 32}" height="${slabH - 20}" fill="rgba(178,106,0,0.12)" stroke="#b26a00"/>
+    <text x="${x0 + 24}" y="${y0 + 26}" font-size="11" fill="#6b4600">A_slab = b·t</text>
+    <line x1="${x0 + bw/2}" y1="${slabCy}" x2="${x0 + bw/2}" y2="${naY}" stroke="#5c6f82" marker-end="url(#arrowTiny)"/>
+    <text x="${x0 + bw/2 + 8}" y="${qy}" font-size="11">Q = A_slab(ȳ − t/2)</text>
+    <line x1="${qx}" y1="${y0 + slabH}" x2="${qx+60}" y2="${y0 + slabH}" stroke="#b26a00" stroke-width="2.2" marker-end="url(#arrowTiny)"/>
+    <text x="${qx+66}" y="${y0 + slabH + 4}" font-size="11">q along cold joint</text>
+    <defs><marker id="arrowTiny" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#5c6f82"/></marker></defs>
+  </svg>`;
+}
+
+function demandFigure(r) {
+  const i = r.inputs;
+  const L = beamLength(i);
+  const w = 470, h = 180, x0 = 40, y0 = 88, bw = 380;
+  const jointY = y0 - 10;
+  return `<svg viewBox="0 0 ${w} ${h}" role="img" aria-label="Beam demand sketch">
+    <line x1="${x0}" y1="${y0}" x2="${x0 + bw}" y2="${y0}" stroke="#5f6f82" stroke-width="5"/>
+    <line x1="${x0}" y1="${jointY}" x2="${x0 + bw}" y2="${jointY}" stroke="#b26a00" stroke-width="2.2" stroke-dasharray="7 5"/>
+    <polygon points="${x0},${y0+4} ${x0-14},${y0+28} ${x0+14},${y0+28}" fill="#d9e2ec" stroke="#334e68"/>
+    <polygon points="${x0+bw},${y0+4} ${x0+bw-14},${y0+28} ${x0+bw+14},${y0+28}" fill="#d9e2ec" stroke="#334e68"/>
+    ${Array.from({length:9},(_,k)=>{const x=x0+bw*(k/8); return `<line x1="${x}" y1="24" x2="${x}" y2="${jointY-6}" stroke="#1f6feb" marker-end="url(#arrowBlue2)"/>`;}).join('')}
+    <text x="${x0+2}" y="18" font-size="11" fill="#1f6feb">Wf</text>
+    <text x="${x0+bw/2}" y="${y0+52}" font-size="11" text-anchor="middle">span L</text>
+    <path d="M${x0+12},${y0-34} Q${x0+bw/2},${y0-92} ${x0+bw-12},${y0-34}" fill="none" stroke="#1f6feb" stroke-width="2.5"/>
+    <text x="${x0+bw/2}" y="${y0-96}" font-size="11" text-anchor="middle">Mf envelope</text>
+    <path d="M${x0},${y0+38} L${x0+bw},${y0+76}" fill="none" stroke="#1f6feb" stroke-width="2.5"/>
+    <text x="${x0+bw-8}" y="${y0+74}" font-size="11" text-anchor="end">Vf envelope</text>
+    <text x="${x0+150}" y="${jointY-14}" font-size="11" fill="#6b4600">interface shear demand q and stress v = q/b</text>
+    <defs><marker id="arrowBlue2" markerWidth="8" markerHeight="8" refX="4" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 Z" fill="#1f6feb"/></marker></defs>
+  </svg>`;
+}
+
+function shearTrussFigure(r) {
+  return `<svg viewBox="0 0 470 175" role="img" aria-label="Vertical shear truss analogy sketch">
+    <rect x="45" y="42" width="350" height="88" fill="#edf2f7" stroke="#4a5568"/>
+    <path d="M70 115 L120 57 L170 115 L220 57 L270 115 L320 57" fill="none" stroke="#2a5caa" stroke-width="2.5"/>
+    <line x1="70" y1="50" x2="70" y2="122" stroke="#b3261e" stroke-width="3"/>
+    <line x1="170" y1="50" x2="170" y2="122" stroke="#b3261e" stroke-width="3"/>
+    <line x1="270" y1="50" x2="270" y2="122" stroke="#b3261e" stroke-width="3"/>
+    <text x="53" y="28" font-size="11">Concrete compression field at angle θ</text>
+    <text x="297" y="77" font-size="11" fill="#b3261e">Stirrups provide V_s</text>
+    <text x="53" y="147" font-size="11">Concrete provides V_c</text>
+    <text x="55" y="165" font-size="11">Check: V_r = V_c + V_s ≥ V_f</text>
+  </svg>`;
+}
+
+function interfaceFrictionFigure(r) {
+  return `<svg viewBox="0 0 470 185" role="img" aria-label="Interface shear-friction concept sketch">
+    <rect x="55" y="28" width="320" height="34" fill="#dce9f8" stroke="#49617c"/>
+    <rect x="55" y="62" width="320" height="74" fill="#edf2f7" stroke="#49617c"/>
+    <line x1="55" y1="62" x2="375" y2="62" stroke="#b26a00" stroke-width="2.4" stroke-dasharray="7 5"/>
+    <line x1="120" y1="14" x2="120" y2="107" stroke="#b3261e" stroke-width="3"/>
+    <line x1="210" y1="14" x2="210" y2="107" stroke="#b3261e" stroke-width="3"/>
+    <line x1="300" y1="14" x2="300" y2="107" stroke="#b3261e" stroke-width="3"/>
+    <line x1="88" y1="47" x2="152" y2="47" stroke="#b26a00" stroke-width="2.4" marker-end="url(#arrowBrown)"/>
+    <text x="156" y="51" font-size="11">interface demand q</text>
+    <text x="389" y="64" font-size="11">roughened cold joint</text>
+    <text x="389" y="92" font-size="11">crossing steel ratio ρ_v</text>
+    <text x="389" y="110" font-size="11">resistance v_r = λϕ_c(c + μρ_v f_y)</text>
+    <defs><marker id="arrowBrown" markerWidth="8" markerHeight="8" refX="4" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 Z" fill="#b26a00"/></marker></defs>
+  </svg>`;
+}
+
 
 function buildCalculationReportSections(r) {
   const i = r.inputs;
@@ -1461,9 +1558,10 @@ function buildCalculationReportSections(r) {
 
   return [
     {
-      title: "1. Inputs and assumptions",
+      title: "1. Calculation set, inputs, and variable key",
       blocks: [
-        reportText("This report follows the current app inputs and generated shear-zone schedule. It is intended as a transparent calculation aid, not a substitute for project-specific engineering review."),
+        reportText("<strong>What this calculation set does:</strong> starting from the selected beam system and factored loads, the app determines the governing beam actions, converts those actions into cold-joint interface demand, checks vertical beam shear and interface shear-transfer resistance, then develops a practical shear-zone schedule."),
+        reportText("<strong>Calculation sequence:</strong> (1) define inputs and section geometry, (2) solve beam actions and interface demand, (3) check flexural reasonableness, (4) check vertical beam shear, spacing, and minimum steel, (5) check interface shear-transfer, (6) allocate crossing steel and determine added dowels if required, and (7) generate a consolidated zone schedule."),
         reportTable(["Item", "Value"], [
           ["Beam system", `${labelBeamSystem(i.beamSystem)}; L1=${fmt(i.L1,3)} m${i.beamSystem === "twoSpan" ? `; L2=${fmt(i.L2,3)} m` : ""}`],
           ["Factored loading", `Wf=${fmt(i.Wf,3)} kN/m${i.includePoint ? `; Pf=${fmt(i.Pf,3)} kN at x=${fmt(i.Px,3)} m` : "; no point load included"}`],
@@ -1472,13 +1570,30 @@ function buildCalculationReportSections(r) {
           ["Interface", `${interfaceConditionLabel(i.interfaceCondition)}; c=${fmt(i.cohesion,2)} MPa; μ=${fmt(i.mu,2)}; demand model=${qModel}`],
           ["Reinforcement basis", `Bottom steel ${fmt(i.mainCount,0)}-${i.mainBar}; primary shear ${fmt(i.stirrupLegs,0)} legs ${i.stirrupBar}; additional dowel/hairpin ${fmt(i.dowelLegs,0)} legs ${i.dowelBar}`],
           ["Zone rules", `${i.zoneDesignMode}; spacing range ${fmt(i.zoneMinSpacing,0)}–${fmt(i.zoneMaxSpacing,0)} mm; minimum zone length = max(user input, 2d) = ${fmt(minLen,2)} m`]
-        ])
+        ]),
+        reportText("<strong>Variable key:</strong> b = beam/interface width; h = total depth including second-placement slab; t = slab depth above the cold joint; I_g = gross second moment of area; ȳ = neutral-axis depth from top; A_slab = slab area above interface; Q = first moment of slab area about the neutral axis; d = effective depth to bottom steel; d_v = effective shear depth; z = flexural lever arm used for the cracked interface-demand check."),
+        reportText("Additional force variables: V_f = factored vertical shear; M_f = factored bending moment; q = interface shear flow in kN/m; v = interface shear stress in MPa; V_c = concrete shear contribution; V_s = stirrup shear contribution; V_r = total vertical shear resistance; ρ_v = ratio of reinforcement crossing the interface; A_v/s = crossing steel area per unit length."),
+        reportNote("Every variable used in the formulas below is either defined in the text, shown in the variable-key list, or labeled in the accompanying sketches.")
       ]
     },
     {
-      title: "2. Section properties and interface shear-flow geometry",
+      title: "2. Find the section geometry used for interface demand",
       blocks: [
-        reportText("For the elastic interface shear-flow check, the slab above the cold joint is treated as the area that must be dragged horizontally by shear flow across the interface."),
+        reportText("<strong>Purpose of this step:</strong> determine the geometric properties required to convert the beam shear force into horizontal shear flow on the cold joint. For the elastic VQ/I method, the slab above the cold joint is treated as the area that must be dragged horizontally relative to the beam below."),
+        reportFigure(sectionGeometryFigure(r), "Section geometry sketch showing the cold joint, slab area above the interface, neutral axis, and the first-moment lever arm used for Q."),
+        reportTable(["Variable", "Meaning", "Current value"], [
+          ["b", "beam/interface width", `${fmt(i.b,0)} mm`],
+          ["h", "total overall depth", `${fmt(i.h,0)} mm`],
+          ["t", "second-placement slab depth above interface", `${fmt(sec.slabDepth,0)} mm`],
+          ["ȳ", "gross-section neutral axis from top", `${fmt(na,1)} mm`],
+          ["A_slab", "area above interface = b·t", `${fmt(slabArea,0)} mm²`],
+          ["Q", "first moment of A_slab about the neutral axis", `${fmt(sec.Q,0)} mm³`],
+          ["I_g", "gross second moment of area", `${fmt(sec.Ig,0)} mm⁴`],
+          ["d", "effective depth to bottom tension steel", `${fmt(sec.d,1)} mm`],
+          ["d_v", "effective shear depth", `${fmt(sec.dv,1)} mm`],
+          ["z", "lever arm for cracked force-flow demand", `${fmt(sec.z,1)} mm`]
+        ]),
+        reportText("The formulas below calculate those geometry terms step by step."),
         reportFormula(`I<sub>g</sub> = ${ffrac("b h<sup>3</sup>", "12")} = ${ffrac(`${fmt(i.b,0)}(${fmt(i.h,0)})<sup>3</sup>`, "12")}`),
         reportResult(`I<sub>g</sub> = ${fmt(sec.Ig,0)} mm<sup>4</sup>`),
         reportFormula(`ȳ = ${ffrac("h", "2")} = ${ffrac(fmt(i.h,0), "2")}`),
@@ -1496,12 +1611,23 @@ function buildCalculationReportSections(r) {
       ]
     },
     {
-      title: "3. Beam actions and interface demand envelope",
+      title: "3. Find the beam actions and convert them to cold-joint demand",
       blocks: [
-        reportText("The app solves the beam line model and reports the maximum absolute demand envelope. For the rightmost station, the internal action is evaluated just inside the support so the plotted shear does not artificially return to zero at the support node."),
+        reportText("<strong>Purpose of this step:</strong> solve the beam for the factored shear and moment envelopes, then convert the governing vertical shear into horizontal shear flow demand on the cold joint. The beam solver determines V_f and M_f along the span; the interface-demand model then converts V_f into q and v."),
+        reportFigure(demandFigure(r), "Beam-action sketch showing the factored distributed load, support reactions, and the demand quantities used by the report: M_f, V_f, q, and v=q/b."),
+        reportTable(["Variable", "Meaning", "Governing value"], [
+          ["V_f", "factored beam shear", `${fmt(s.maxV,2)} kN at x≈${fmt(govV.x,3)} m`],
+          ["M_f", "factored bending moment", `${fmt(s.maxMabs,2)} kN·m at x≈${fmt(govM.x,3)} m`],
+          ["q_elastic", "interface shear flow from VQ/I", `${fmt(govQ.qElastic,2)} kN/m`],
+          ["q_cracked", "cracked force-flow demand |V|/z", `${fmt(govQ.qCracked,2)} kN/m`],
+          ["q_design", "selected governing interface demand", `${fmt(govQ.qDesign,2)} kN/m at x≈${fmt(govQ.x,3)} m`],
+          ["v_f", "interface stress = q_design/b", `${fmt(s.maxStress,4)} MPa`]
+        ]),
+        reportText("For the rightmost station, the internal action is evaluated just inside the support so the plotted and reported shear does not artificially return to zero at the support node."),
         reportResult(reactions || "No support reactions reported"),
         reportFormula(`max |V<sub>f</sub>| = ${fmt(s.maxV,2)} kN at approximately x = ${fmt(govV.x,3)} m`),
         reportFormula(`max |M<sub>f</sub>| = ${fmt(s.maxMabs,2)} kN·m at approximately x = ${fmt(govM.x,3)} m`),
+        reportText("The interface demand model selected in the app is used as follows."),
         reportFormula(qFormula),
         reportFormula(`At governing interface station x = ${fmt(govQ.x,3)} m: q<sub>elastic</sub> = ${fmt(govQ.qElastic,2)} kN/m; q<sub>cracked</sub> = ${fmt(govQ.qCracked,2)} kN/m; q<sub>design</sub> = ${fmt(govQ.qDesign,2)} kN/m`),
         reportFormula(`v<sub>f</sub> = ${ffrac("q<sub>design</sub>", "b")} = ${ffrac(fmt(s.maxQ,2), fmt(i.b,0))}`),
@@ -1509,9 +1635,15 @@ function buildCalculationReportSections(r) {
       ]
     },
     {
-      title: "4. Flexural resistance estimate",
+      title: "4. Check whether the selected longitudinal steel is flexurally reasonable",
       blocks: [
-        reportText("This is a simplified rectangular-stress-block estimate used to flag whether the selected longitudinal reinforcement is consistent with the demand envelope."),
+        reportText("<strong>Purpose of this step:</strong> estimate the flexural resistance of the selected bottom longitudinal steel using a simplified rectangular stress block. This is a reasonableness check so the shear and interface design are not being assessed with obviously inadequate longitudinal reinforcement."),
+        reportTable(["Variable", "Meaning", "Current value"], [
+          ["A_s", "total bottom longitudinal steel area", `${fmt(sec.As,0)} mm²`],
+          ["a", "equivalent compression-block depth", `${fmt(s.flex.a,1)} mm`],
+          ["c", "neutral-axis depth from top for the stress block", `${fmt(s.flex.c,1)} mm`],
+          ["M_r", "estimated flexural resistance", `${fmt(s.flex.Mr,2)} kN·m`]
+        ]),
         reportFormula(`A<sub>s</sub> = n A<sub>bar</sub> = ${fmt(i.mainCount,0)}(${fmt(main.area,0)})`),
         reportResult(`A<sub>s</sub> = ${fmt(sec.As,0)} mm<sup>2</sup>`),
         reportFormula(`α<sub>1</sub> = ${fmt(s.flex.alpha1,3)}, &nbsp; β<sub>1</sub> = ${fmt(s.flex.beta1,3)}`),
@@ -1526,12 +1658,23 @@ function buildCalculationReportSections(r) {
       ]
     },
     {
-      title: "5. Vertical beam shear design check",
+      title: "5. Check vertical beam shear strength",
       blocks: [
-        reportText("The vertical beam shear check uses the simplified CSA-style parameters currently selected in the app."),
+        reportText("<strong>Purpose of this step:</strong> verify that the selected stirrup arrangement provides sufficient vertical beam shear resistance. In this simplified CSA-style procedure, the concrete provides V_c, the stirrups provide V_s, and the total vertical resistance is V_r = V_c + V_s."),
+        reportFigure(shearTrussFigure(r), "Simplified truss-analogy sketch: diagonal concrete compression field at angle θ plus vertical stirrups providing V_s."),
+        reportTable(["Variable", "Meaning", "Current value"], [
+          ["β", "simplified cracked-concrete factor", `${fmt(s.beta,3)}`],
+          ["θ", "compression-field angle", `${fmt(s.thetaDeg,1)}°`],
+          ["cotθ", "geometric factor in V_s", `${fmt(s.cotTheta,3)}`],
+          ["V_c", "concrete shear contribution", `${fmt(s.Vc,2)} kN`],
+          ["A_v,set", "crossing stirrup area in one stirrup set", `${fmt(s.stirrupAvSet,0)} mm²`],
+          ["V_s", "stirrup shear contribution", `${fmt(s.Vs,2)} kN`],
+          ["V_r", "total vertical shear resistance", `${fmt(s.Vr,2)} kN`]
+        ]),
         reportFormula(`β = ${fmt(s.beta,3)}, &nbsp; θ = ${fmt(s.thetaDeg,1)}°, &nbsp; cotθ = ${fmt(s.cotTheta,3)}, &nbsp; √f′<sub>c</sub> = ${fmt(Math.sqrt(i.fc),3)}`),
         reportFormula(`V<sub>c</sub> = ${ffrac("ϕ<sub>c</sub>λβ√f′<sub>c</sub>b d<sub>v</sub>", "1000")} = ${ffrac(`${fmt(i.phiC,2)}(${fmt(i.lambda,2)})(${fmt(s.beta,3)})(${fmt(Math.sqrt(i.fc),3)})(${fmt(i.b,0)})(${fmt(sec.dv,1)})`, "1000")}`),
         reportResult(`V<sub>c</sub> = ${fmt(s.Vc,2)} kN`),
+        reportText("The required crossing steel per unit length for vertical beam shear is obtained by rearranging the stirrup contribution equation."),
         reportFormula(`${ffrac("A<sub>v</sub>", "s")}<sub>beam req</sub> = max[0, ${ffrac("(V<sub>f</sub> - V<sub>c</sub>)1000", "ϕ<sub>s</sub>f<sub>y</sub>d<sub>v</sub>cotθ")}]`),
         reportFormula(`${ffrac("A<sub>v</sub>", "s")}<sub>beam req</sub> = ${ffrac(`(${fmt(s.maxV,2)} - ${fmt(s.Vc,2)})1000`, `${fmt(i.phiS,2)}(${fmt(i.fy,0)})(${fmt(sec.dv,1)})(${fmt(s.cotTheta,3)})`)}`),
         reportResult(`${ffrac("A<sub>v</sub>", "s")}<sub>beam req</sub> = ${fmt(beamReqPerMm,3)} mm<sup>2</sup>/mm = ${fmt(s.beamAvReqPerM,0)} mm<sup>2</sup>/m`),
@@ -1544,8 +1687,15 @@ function buildCalculationReportSections(r) {
       ]
     },
     {
-      title: "6. Stirrup spacing and minimum shear steel checks",
+      title: "6. Check stirrup spacing and minimum shear steel",
       blocks: [
+        reportText("<strong>Purpose of this step:</strong> even if shear strength is adequate, the selected stirrup spacing must still satisfy the CSA spacing limits, and the provided stirrup set must also meet the minimum shear-steel requirement. The final zone schedule repeats this check locally using each zone spacing."),
+        reportTable(["Variable", "Meaning", "Current value"], [
+          ["V_threshold", "limit separating high-shear and low-shear spacing rules", `${fmt(s.highShearThreshold,2)} kN`],
+          ["s_max", "global governing maximum selected spacing", `${fmt(s.sMax,1)} mm`],
+          ["A_v,min", "minimum stirrup set area at selected spacing", `${fmt(s.AvMin,1)} mm²`],
+          ["A_v,set", "provided area in one selected stirrup set", `${fmt(s.stirrupAvSet,1)} mm²`]
+        ]),
         reportFormula(`V<sub>threshold</sub> = ${ffrac("0.125λϕ<sub>c</sub>√f′<sub>c</sub>b d<sub>v</sub>", "1000")} = ${fmt(s.highShearThreshold,2)} kN`),
         reportFormula(`High-shear spacing limit: s ≤ min(0.35d<sub>v</sub>, 300) = min(${fmt(0.35*sec.dv,1)}, 300)`),
         reportFormula(`Low-shear spacing limit: s ≤ min(0.70d<sub>v</sub>, 600) = min(${fmt(0.70*sec.dv,1)}, 600)`),
@@ -1556,10 +1706,20 @@ function buildCalculationReportSections(r) {
       ]
     },
     {
-      title: "7. Cold-joint interface shear-transfer check",
+      title: "7. Find the cold-joint interface shear-transfer reinforcement required",
       blocks: [
+        reportText("<strong>Purpose of this step:</strong> determine how much reinforcement must cross the cold joint so the interface can transfer the required horizontal shear flow. The selected interface condition provides the cohesion c and friction coefficient μ, and the crossing steel ratio ρ_v provides the clamping force."),
+        reportFigure(interfaceFrictionFigure(r), "Interface shear-friction sketch showing the roughened cold joint, crossing reinforcement, and the demand q resisted by friction and cohesion."),
+        reportTable(["Variable", "Meaning", "Current value"], [
+          ["c", "cohesion factor for the selected interface condition", `${fmt(i.cohesion,2)} MPa`],
+          ["μ", "friction coefficient for the selected interface condition", `${fmt(i.mu,2)}`],
+          ["ρ_v,req", "required ratio of reinforcement crossing the interface", `${fmt(s.rhoReq,6)}`],
+          ["(A_v/s)_interface req", "required crossing steel per unit length", `${fmt(s.interfaceAvReqPerM,0)} mm²/m`],
+          ["v_limit", "upper concrete-interface stress limit", `${fmt(s.concreteLimit,3)} MPa`]
+        ]),
         reportText(`Interface condition: <strong>${interfaceConditionLabel(i.interfaceCondition)}</strong>. The selected coefficients are c=${fmt(i.cohesion,2)} MPa and μ=${fmt(i.mu,2)}.`),
         reportFormula(`v<sub>r</sub> = λϕ<sub>c</sub>(c + μρ<sub>v</sub>f<sub>y</sub>)`),
+        reportText("Rearrange the resistance expression to solve for the required crossing-steel ratio ρ_v, then multiply by the interface width b to convert that ratio into the required crossing steel per unit length A_v/s."),
         reportFormula(`ρ<sub>v,req</sub> = ${ffrac("v<sub>f</sub>/(λϕ<sub>c</sub>) - c", "μf<sub>y</sub>")} = ${ffrac(`${fmt(s.maxStress,4)}/(${fmt(i.lambda,2)}×${fmt(i.phiC,2)}) - ${fmt(i.cohesion,2)}`, `${fmt(i.mu,2)}(${fmt(i.fy,0)})`)}`),
         reportResult(`ρ<sub>v,req</sub> = ${fmt(s.rhoReq,6)}`),
         reportFormula(`${ffrac("A<sub>v</sub>", "s")}<sub>interface req</sub> = ρ<sub>v,req</sub>b = ${fmt(s.rhoReq,6)}(${fmt(i.b,0)})`),
@@ -1569,11 +1729,20 @@ function buildCalculationReportSections(r) {
       ]
     },
     {
-      title: "8. Conservative steel allocation and added dowel requirement",
+      title: "8. Determine unused stirrup balance and added dowel requirement",
       blocks: [
+        reportText("<strong>Purpose of this step:</strong> avoid double-counting the same crossing stirrup steel for both vertical beam shear and interface shear-transfer. The selected conservative allocation method first 'spends' the portion of A_v/s needed for vertical beam shear, then credits only the unused balance to the cold-joint interface. Any remaining shortfall becomes additional dowel or hairpin reinforcement."),
         reportText(i.allocation === "balance"
-          ? "The selected allocation method subtracts the vertical beam shear steel demand from the crossing stirrup steel before crediting the remaining clamping steel to the interface. This avoids double-counting the same stirrup yield force for two incompatible mechanisms."
+          ? "The selected allocation method subtracts the vertical beam shear steel demand from the crossing stirrup steel before crediting the remaining clamping steel to the interface."
           : "The selected allocation method credits the full crossing stirrup steel to the interface check."),
+        reportTable(["Variable", "Meaning", "Current value"], [
+          ["(A_v/s)_prov", "provided crossing primary stirrup steel per unit length", `${fmt(s.stirrupAvPerM,0)} mm²/m`],
+          ["(A_v/s)_beam req", "portion required for vertical beam shear", `${fmt(s.beamAvReqPerM,0)} mm²/m`],
+          ["(A_v/s)_unused", "balance available for interface clamping", `${fmt(s.unusedStirrupAv,0)} mm²/m`],
+          ["(A_v/s)_add req", "additional interface reinforcement required", `${fmt(s.additionalInterfaceReq,0)} mm²/m`],
+          ["(A_v/s)_dowel", "provided added dowel/hairpin steel", `${fmt(s.dowelAvPerM,0)} mm²/m`],
+          ["(A_v/s)_available", "total steel available to the interface", `${fmt(s.totalInterfaceAvailable,0)} mm²/m`]
+        ]),
         reportFormula(`${ffrac("A<sub>v</sub>", "s")}<sub>prov</sub> = ${ffrac("A<sub>v,set</sub>", "s")} = ${ffrac(fmt(s.stirrupAvSet,0), fmt(i.stirrupSpacing,0))}`),
         reportResult(`${ffrac("A<sub>v</sub>", "s")}<sub>prov</sub> = ${fmt(primaryPerMm,3)} mm<sup>2</sup>/mm = ${fmt(s.stirrupAvPerM,0)} mm<sup>2</sup>/m`),
         reportFormula(`${ffrac("A<sub>v</sub>", "s")}<sub>unused</sub> = ${ffrac("A<sub>v</sub>", "s")}<sub>prov</sub> - ${ffrac("A<sub>v</sub>", "s")}<sub>beam req</sub> = ${fmt(s.stirrupAvPerM,0)} - ${fmt(s.beamAvReqPerM,0)}`),
@@ -1588,9 +1757,10 @@ function buildCalculationReportSections(r) {
       ]
     },
     {
-      title: "9. Shear-zone design schedule and local utilization",
+      title: "9. Generate and read the shear-zone design schedule",
       blocks: [
-        reportText("Each design zone is governed by the worst station inside that zone. Adjacent ranges with the same reinforcement are consolidated into one schedule row."),
+        reportText("<strong>Purpose of this step:</strong> turn the continuous demand envelope into a practical reinforcement schedule. Each design zone is governed by the worst station inside that zone, the selected spacing is checked against the zone demand, and adjacent ranges with the same reinforcement are consolidated into a single schedule row."),
+        reportText("To follow the schedule: read the x-range, then apply the listed primary stirrup spacing and any added interface dowels over that range. The local-allocation table below shows how each zone's selected reinforcement compares with the governing beam and interface demands."),
         reportTable(["Zone", "x range", "Length", "Primary shear reinforcement", "Added interface dowels", "Gov |Vf|", "Shear utilization", "Status"], zoneRows),
         reportText("Local allocation summary by zone, in mm²/m:"),
         reportTable(["Zone", "x range", "Primary Av/s", "Beam req", "Unused", "Interface req", "Add req", "Dowel Av/s", "Available"], zoneCalcRows)
@@ -1599,6 +1769,7 @@ function buildCalculationReportSections(r) {
     {
       title: "10. Final utilization summary",
       blocks: [
+        reportText("<strong>Purpose of this step:</strong> summarize the governing utilization checks so the final design can be reviewed quickly after the step-by-step calculations above."),
         reportFormula(`${ffrac("M<sub>f</sub>", "M<sub>r</sub>")} = ${fmt(s.flexRatio,3)} → ${reportStatusHtml(s.flexUtilizationOk)}`),
         reportFormula(`${ffrac("V<sub>beam</sub>", "V<sub>r,beam</sub>")} = ${fmt(s.beamShearRatio,3)}`),
         reportFormula(`${ffrac("V<sub>interface</sub>", "V<sub>r,interface</sub>")} = ${fmt(s.interfaceShearRatio,3)}`),
@@ -1633,6 +1804,9 @@ function renderReportBlock(block) {
   }
   if (block.type === "table") {
     return `<div class="report-table-wrap"><table class="report-calc-table"><thead><tr>${block.headers.map(h => `<th>${h}</th>`).join("")}</tr></thead><tbody>${block.rows.map(row => `<tr>${row.map(cell => `<td>${cell}</td>`).join("")}</tr>`).join("")}</tbody></table></div>`;
+  }
+  if (block.type === "figure") {
+    return `<figure class="report-figure">${block.svg}${block.caption ? `<figcaption>${block.caption}</figcaption>` : ""}</figure>`;
   }
   return "";
 }

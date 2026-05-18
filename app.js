@@ -1350,8 +1350,48 @@ function reportStatus(ok) {
   return ok ? "OK" : "NG";
 }
 
-function reportLine(label, value, note = "") {
-  return { label, value, note };
+function reportStatusHtml(ok) {
+  return `<span class="report-status ${ok ? "ok" : "ng"}">${reportStatus(ok)}</span>`;
+}
+
+function reportText(html) {
+  return { type: "text", html };
+}
+
+function reportNote(html) {
+  return { type: "note", html };
+}
+
+function reportFormula(html) {
+  return { type: "formula", html };
+}
+
+function reportResult(html, ok = null) {
+  return { type: "result", html, ok };
+}
+
+function reportTable(headers, rows) {
+  return { type: "table", headers, rows };
+}
+
+function ffrac(num, den) {
+  return `<span class="frac"><span>${num}</span><span>${den}</span></span>`;
+}
+
+function sub(name, suffix) {
+  return `${name}<sub>${suffix}</sub>`;
+}
+
+function maxStationBy(r, key) {
+  return r.stations.reduce((best, st) => Math.abs(st[key]) > Math.abs(best[key]) ? st : best, r.stations[0]);
+}
+
+function maxStationByValue(r, fn) {
+  return r.stations.reduce((best, st) => fn(st) > fn(best) ? st : best, r.stations[0]);
+}
+
+function rangeText(ranges) {
+  return (ranges || []).map(rg => `${fmt(rg.x1,2)}–${fmt(rg.x2,2)} m`).join("; ");
 }
 
 function buildCalculationReportSections(r) {
@@ -1365,106 +1405,206 @@ function buildCalculationReportSections(r) {
   const slabCentroid = sec.slabDepth / 2;
   const na = sec.neutralAxisFromTop;
   const qModel = demandModelLabel(i.interfaceDemandModel);
-  const reactions = r.fe.reactions.map((rx, idx) => `R${idx + 1} = ${fmt(rx.vertical, 2)} kN at x=${fmt(rx.x, 3)} m`).join("; ");
+  const reactions = r.fe.reactions.map((rx, idx) => `R<sub>${idx + 1}</sub> = ${fmt(rx.vertical, 2)} kN at x=${fmt(rx.x, 3)} m`).join("; ");
+  const govV = maxStationBy(r, "V");
+  const govM = maxStationBy(r, "M");
+  const govQ = maxStationByValue(r, st => Math.abs(st.qDesign));
   const st = activeStation(r);
   const local = st ? localDesignForStation(r, st) : null;
+  const beamReqPerMm = s.beamAvReqPerM / 1000;
+  const primaryPerMm = s.stirrupAvPerM / 1000;
+  const interfaceReqPerMm = s.interfaceAvReqPerM / 1000;
+  const addReqPerMm = s.additionalInterfaceReq / 1000;
+  const minLen = zoneMinimumLength(r);
+  const qFormula = i.interfaceDemandModel === "cracked"
+    ? `${sub("q", "f")} = ${ffrac("|V<sub>f</sub>| × 1000", "z")}`
+    : i.interfaceDemandModel === "max"
+      ? `${sub("q", "f")} = max(${ffrac("|V<sub>f</sub>| × 1000 × Q", "I<sub>g</sub>")}, ${ffrac("|V<sub>f</sub>| × 1000", "z")})`
+      : `${sub("q", "f")} = ${ffrac("|V<sub>f</sub>| × 1000 × Q", "I<sub>g</sub>")}`;
+
+  const zoneRows = (s.zoneSchedule || []).map(z => {
+    const ev = z.gov || {};
+    const zDowel = z.dowelSpacing ? `${fmt(i.dowelLegs,0)} legs ${i.dowelBar} @ ${fmt(z.dowelSpacing,0)} mm` : "None";
+    return [
+      z.name,
+      rangeText(z.ranges || [{ x1: z.x1, x2: z.x2 }]),
+      `${fmt(z.length,2)} m`,
+      `${fmt(i.stirrupLegs,0)} legs ${i.stirrupBar} @ ${fmt(z.primarySpacing,0)} mm`,
+      zDowel,
+      `${fmt(Math.abs(ev.station?.V ?? 0),1)} kN`,
+      `${fmt(ev.shearRatio ?? 0,3)}`,
+      reportStatus(z.ok)
+    ];
+  });
+
+  const zoneCalcRows = (s.zoneSchedule || []).map(z => {
+    const ev = z.gov || {};
+    const rg = z.ranges || [{ x1: z.x1, x2: z.x2 }];
+    const avPrimary = s.stirrupAvSet / Math.max(1, z.primarySpacing) * 1000;
+    const beamReq = ev.beamAvReqPerM ?? 0;
+    const unused = i.allocation === "balance" ? Math.max(0, avPrimary - beamReq) : avPrimary;
+    const dowelPerM = z.dowelSpacing ? s.dowelAvSet / Math.max(1, z.dowelSpacing) * 1000 : 0;
+    const available = unused + dowelPerM;
+    const addReq = Math.max(0, (ev.interfaceAvReqPerM ?? 0) - unused);
+    return [
+      z.name,
+      rangeText(rg),
+      `${fmt(avPrimary,0)}`,
+      `${fmt(beamReq,0)}`,
+      `${fmt(unused,0)}`,
+      `${fmt(ev.interfaceAvReqPerM ?? 0,0)}`,
+      `${fmt(addReq,0)}`,
+      `${fmt(dowelPerM,0)}`,
+      `${fmt(available,0)}`
+    ];
+  });
 
   return [
     {
-      title: "1. Inputs and design assumptions",
-      lines: [
-        reportLine("Beam system", `${labelBeamSystem(i.beamSystem)}; L1=${fmt(i.L1,3)} m${i.beamSystem === "twoSpan" ? `, L2=${fmt(i.L2,3)} m` : ""}`),
-        reportLine("Factored loading", `Wf=${fmt(i.Wf,3)} kN/m${i.includePoint ? `; Pf=${fmt(i.Pf,3)} kN at x=${fmt(i.Px,3)} m` : "; no point load included"}`),
-        reportLine("Geometry", `b=${fmt(i.b,0)} mm; h=${fmt(i.h,0)} mm; second-placement slab depth=${fmt(sec.slabDepth,0)} mm`),
-        reportLine("Materials", `f'c=${fmt(i.fc,2)} MPa; fy=${fmt(i.fy,0)} MPa; λ=${fmt(i.lambda,2)}; ϕc=${fmt(i.phiC,2)}; ϕs=${fmt(i.phiS,2)}`),
-        reportLine("Interface assumption", `${interfaceConditionLabel(i.interfaceCondition)}; c=${fmt(i.cohesion,2)} MPa; μ=${fmt(i.mu,2)}; demand model=${qModel}`),
-        reportLine("Selected reinforcement", `Primary=${fmt(i.stirrupLegs,0)} legs ${i.stirrupBar} @ ${fmt(i.stirrupSpacing,0)} mm; additional=${fmt(i.dowelLegs,0)} legs ${i.dowelBar} @ ${fmt(i.dowelSpacing,0)} mm; bottom steel=${fmt(i.mainCount,0)}-${i.mainBar}`)
+      title: "1. Inputs and assumptions",
+      blocks: [
+        reportText("This report follows the current app inputs and generated shear-zone schedule. It is intended as a transparent calculation aid, not a substitute for project-specific engineering review."),
+        reportTable(["Item", "Value"], [
+          ["Beam system", `${labelBeamSystem(i.beamSystem)}; L1=${fmt(i.L1,3)} m${i.beamSystem === "twoSpan" ? `; L2=${fmt(i.L2,3)} m` : ""}`],
+          ["Factored loading", `Wf=${fmt(i.Wf,3)} kN/m${i.includePoint ? `; Pf=${fmt(i.Pf,3)} kN at x=${fmt(i.Px,3)} m` : "; no point load included"}`],
+          ["Section", `b=${fmt(i.b,0)} mm; h=${fmt(i.h,0)} mm; second-placement slab depth t=${fmt(sec.slabDepth,0)} mm`],
+          ["Materials", `f′c=${fmt(i.fc,2)} MPa; fy=${fmt(i.fy,0)} MPa; λ=${fmt(i.lambda,2)}; ϕc=${fmt(i.phiC,2)}; ϕs=${fmt(i.phiS,2)}`],
+          ["Interface", `${interfaceConditionLabel(i.interfaceCondition)}; c=${fmt(i.cohesion,2)} MPa; μ=${fmt(i.mu,2)}; demand model=${qModel}`],
+          ["Reinforcement basis", `Bottom steel ${fmt(i.mainCount,0)}-${i.mainBar}; primary shear ${fmt(i.stirrupLegs,0)} legs ${i.stirrupBar}; additional dowel/hairpin ${fmt(i.dowelLegs,0)} legs ${i.dowelBar}`],
+          ["Zone rules", `${i.zoneDesignMode}; spacing range ${fmt(i.zoneMinSpacing,0)}–${fmt(i.zoneMaxSpacing,0)} mm; minimum zone length = max(user input, 2d) = ${fmt(minLen,2)} m`]
+        ])
       ]
     },
     {
-      title: "2. Section properties for shear flow",
-      lines: [
-        reportLine("Gross inertia", `Ig = b h³ / 12 = ${fmt(i.b,0)} × ${fmt(i.h,0)}³ / 12 = ${fmt(sec.Ig,0)} mm⁴`),
-        reportLine("Neutral axis", `ȳ = h / 2 = ${fmt(na,1)} mm from top for the gross rectangular section`),
-        reportLine("Area above interface", `A = b ts = ${fmt(i.b,0)} × ${fmt(sec.slabDepth,0)} = ${fmt(slabArea,0)} mm²`),
-        reportLine("First moment of area", `Q = A(ȳ - ts/2) = ${fmt(slabArea,0)} × (${fmt(na,1)} - ${fmt(slabCentroid,1)}) = ${fmt(sec.Q,0)} mm³`),
-        reportLine("Effective depth", `d = h - cover - db,stirrup - db,main/2 = ${fmt(sec.d,1)} mm`, `${i.stirrupBar} db=${fmt(stirrup.diameter,1)} mm; ${i.mainBar} db=${fmt(main.diameter,1)} mm`),
-        reportLine("Effective shear depth", `dv = max(0.9d, 0.72h) = max(${fmt(0.9*sec.d,1)}, ${fmt(0.72*i.h,1)}) = ${fmt(sec.dv,1)} mm`),
-        reportLine("Cracked force-flow lever arm", `z = max(0.5d, ${fmt(i.zFactor,2)}d) = ${fmt(sec.z,1)} mm`)
+      title: "2. Section properties and interface shear-flow geometry",
+      blocks: [
+        reportText("For the elastic interface shear-flow check, the slab above the cold joint is treated as the area that must be dragged horizontally by shear flow across the interface."),
+        reportFormula(`I<sub>g</sub> = ${ffrac("b h<sup>3</sup>", "12")} = ${ffrac(`${fmt(i.b,0)}(${fmt(i.h,0)})<sup>3</sup>`, "12")}`),
+        reportResult(`I<sub>g</sub> = ${fmt(sec.Ig,0)} mm<sup>4</sup>`),
+        reportFormula(`ȳ = ${ffrac("h", "2")} = ${ffrac(fmt(i.h,0), "2")}`),
+        reportResult(`ȳ = ${fmt(na,1)} mm from top`),
+        reportFormula(`A<sub>slab</sub> = b t = ${fmt(i.b,0)}(${fmt(sec.slabDepth,0)})`),
+        reportResult(`A<sub>slab</sub> = ${fmt(slabArea,0)} mm<sup>2</sup>`),
+        reportFormula(`Q = A<sub>slab</sub>(ȳ - t/2) = ${fmt(slabArea,0)}(${fmt(na,1)} - ${fmt(slabCentroid,1)})`),
+        reportResult(`Q = ${fmt(sec.Q,0)} mm<sup>3</sup>`),
+        reportFormula(`d = h - cover - d<sub>b,stirrup</sub> - d<sub>b,main</sub>/2 = ${fmt(i.h,0)} - ${fmt(i.cover,0)} - ${fmt(stirrup.diameter,1)} - ${fmt(main.diameter,1)}/2`),
+        reportResult(`d = ${fmt(sec.d,1)} mm`),
+        reportFormula(`d<sub>v</sub> = max(0.9d, 0.72h) = max(${fmt(0.9*sec.d,1)}, ${fmt(0.72*i.h,1)})`),
+        reportResult(`d<sub>v</sub> = ${fmt(sec.dv,1)} mm`),
+        reportFormula(`z = max(0.5d, ${fmt(i.zFactor,2)}d)`),
+        reportResult(`z = ${fmt(sec.z,1)} mm`)
       ]
     },
     {
-      title: "3. Beam actions and demand envelopes",
-      lines: [
-        reportLine("Support reactions", reactions || "—"),
-        reportLine("Maximum shear", `max |Vf| = ${fmt(s.maxV,2)} kN`),
-        reportLine("Maximum moment", `max |Mf| = ${fmt(s.maxMabs,2)} kN·m`, `max sagging=${fmt(s.maxMpos,2)} kN·m; max hogging=${fmt(s.maxMneg,2)} kN·m`),
-        reportLine("Elastic interface shear flow", `q = VQ/I; max q=${fmt(s.maxQ,2)} kN/m`),
-        reportLine("Interface stress", `v = q / b = ${fmt(s.maxQ,2)} / ${fmt(i.b,0)} = ${fmt(s.maxStress,4)} MPa`)
+      title: "3. Beam actions and interface demand envelope",
+      blocks: [
+        reportText("The app solves the beam line model and reports the maximum absolute demand envelope. For the rightmost station, the internal action is evaluated just inside the support so the plotted shear does not artificially return to zero at the support node."),
+        reportResult(reactions || "No support reactions reported"),
+        reportFormula(`max |V<sub>f</sub>| = ${fmt(s.maxV,2)} kN at approximately x = ${fmt(govV.x,3)} m`),
+        reportFormula(`max |M<sub>f</sub>| = ${fmt(s.maxMabs,2)} kN·m at approximately x = ${fmt(govM.x,3)} m`),
+        reportFormula(qFormula),
+        reportFormula(`At governing interface station x = ${fmt(govQ.x,3)} m: q<sub>elastic</sub> = ${fmt(govQ.qElastic,2)} kN/m; q<sub>cracked</sub> = ${fmt(govQ.qCracked,2)} kN/m; q<sub>design</sub> = ${fmt(govQ.qDesign,2)} kN/m`),
+        reportFormula(`v<sub>f</sub> = ${ffrac("q<sub>design</sub>", "b")} = ${ffrac(fmt(s.maxQ,2), fmt(i.b,0))}`),
+        reportResult(`v<sub>f</sub> = ${fmt(s.maxStress,4)} MPa`)
       ]
     },
     {
       title: "4. Flexural resistance estimate",
-      lines: [
-        reportLine("Tension steel", `As = ${fmt(i.mainCount,0)} × ${fmt(main.area,0)} = ${fmt(sec.As,0)} mm²`),
-        reportLine("Stress block factors", `α1=${fmt(s.flex.alpha1,3)}; β1=${fmt(s.flex.beta1,3)}`),
-        reportLine("Compression block depth", `a = ϕs As fy / (α1 ϕc f'c b) = ${fmt(s.flex.a,1)} mm`),
-        reportLine("Neutral axis depth", `c = a / β1 = ${fmt(s.flex.c,1)} mm from top`),
-        reportLine("Moment resistance", `Mr = ϕs As fy(d - a/2) = ${fmt(s.flex.Mr,2)} kN·m`),
-        reportLine("Flexural utilization", `Mf/Mr = ${fmt(s.flexRatio,3)} → ${reportStatus(s.flexUtilizationOk)}`)
+      blocks: [
+        reportText("This is a simplified rectangular-stress-block estimate used to flag whether the selected longitudinal reinforcement is consistent with the demand envelope."),
+        reportFormula(`A<sub>s</sub> = n A<sub>bar</sub> = ${fmt(i.mainCount,0)}(${fmt(main.area,0)})`),
+        reportResult(`A<sub>s</sub> = ${fmt(sec.As,0)} mm<sup>2</sup>`),
+        reportFormula(`α<sub>1</sub> = ${fmt(s.flex.alpha1,3)}, &nbsp; β<sub>1</sub> = ${fmt(s.flex.beta1,3)}`),
+        reportFormula(`a = ${ffrac("ϕ<sub>s</sub>A<sub>s</sub>f<sub>y</sub>", "α<sub>1</sub>ϕ<sub>c</sub>f′<sub>c</sub>b")} = ${ffrac(`${fmt(i.phiS,2)}(${fmt(sec.As,0)})(${fmt(i.fy,0)})`, `${fmt(s.flex.alpha1,3)}(${fmt(i.phiC,2)})(${fmt(i.fc,1)})(${fmt(i.b,0)})`)}`),
+        reportResult(`a = ${fmt(s.flex.a,1)} mm`),
+        reportFormula(`c = ${ffrac("a", "β<sub>1</sub>")} = ${ffrac(fmt(s.flex.a,1), fmt(s.flex.beta1,3))}`),
+        reportResult(`c = ${fmt(s.flex.c,1)} mm from top`),
+        reportFormula(`M<sub>r</sub> = ϕ<sub>s</sub>A<sub>s</sub>f<sub>y</sub>(d - a/2)`),
+        reportResult(`M<sub>r</sub> = ${fmt(s.flex.Mr,2)} kN·m`),
+        reportFormula(`${ffrac("M<sub>f</sub>", "M<sub>r</sub>")} = ${ffrac(fmt(s.maxMabs,2), fmt(s.flex.Mr,2))} = ${fmt(s.flexRatio,3)}`),
+        reportResult(`Flexural utilization = ${fmt(s.flexRatio,3)} → ${reportStatusHtml(s.flexUtilizationOk)}`, s.flexUtilizationOk)
       ]
     },
     {
       title: "5. Vertical beam shear design check",
-      lines: [
-        reportLine("Simplified shear parameters", `β=${fmt(s.beta,3)}; θ=${fmt(s.thetaDeg,1)}°; cotθ=${fmt(s.cotTheta,3)}`),
-        reportLine("Concrete shear resistance", `Vc = ϕc λ β √f'c b dv = ${fmt(s.Vc,2)} kN`),
-        reportLine("Beam shear steel required", `(Av/s)beam = max[0, (Vf - Vc) / (ϕs fy dv cotθ)] = ${fmt(s.beamAvReqPerM,2)} mm²/m`),
-        reportLine("Primary stirrup area", `Av,set = ${fmt(i.stirrupLegs,0)} × ${fmt(stirrup.area,0)} = ${fmt(s.stirrupAvSet,0)} mm²`),
-        reportLine("Primary stirrup steel per metre", `Av/s = ${fmt(s.stirrupAvSet,0)} / ${fmt(i.stirrupSpacing,0)} × 1000 = ${fmt(s.stirrupAvPerM,2)} mm²/m`),
-        reportLine("Steel shear resistance", `Vs = ϕs(Av/s)fy dv cotθ = ${fmt(s.Vs,2)} kN`),
-        reportLine("Total vertical shear resistance", `Vr = Vc + Vs = ${fmt(s.Vr,2)} kN → ${reportStatus(s.verticalStrengthOk)}`),
-        reportLine("Maximum shear resistance", `Vr,max = 0.25 ϕc f'c b dv = ${fmt(s.VrMax,2)} kN`),
-        reportLine("Spacing limit", `High-shear threshold=${fmt(s.highShearThreshold,2)} kN; smax=${fmt(s.sMax,1)} mm; selected s=${fmt(i.stirrupSpacing,0)} mm → ${reportStatus(s.verticalSpacingOk)}`),
-        reportLine("Minimum shear reinforcement", `Av,min = 0.06√f'c b s / fy = ${fmt(s.AvMin,1)} mm²; provided=${fmt(s.stirrupAvSet,1)} mm² → ${reportStatus(s.minSteelOk)}`)
+      blocks: [
+        reportText("The vertical beam shear check uses the simplified CSA-style parameters currently selected in the app."),
+        reportFormula(`β = ${fmt(s.beta,3)}, &nbsp; θ = ${fmt(s.thetaDeg,1)}°, &nbsp; cotθ = ${fmt(s.cotTheta,3)}, &nbsp; √f′<sub>c</sub> = ${fmt(Math.sqrt(i.fc),3)}`),
+        reportFormula(`V<sub>c</sub> = ${ffrac("ϕ<sub>c</sub>λβ√f′<sub>c</sub>b d<sub>v</sub>", "1000")} = ${ffrac(`${fmt(i.phiC,2)}(${fmt(i.lambda,2)})(${fmt(s.beta,3)})(${fmt(Math.sqrt(i.fc),3)})(${fmt(i.b,0)})(${fmt(sec.dv,1)})`, "1000")}`),
+        reportResult(`V<sub>c</sub> = ${fmt(s.Vc,2)} kN`),
+        reportFormula(`${ffrac("A<sub>v</sub>", "s")}<sub>beam req</sub> = max[0, ${ffrac("(V<sub>f</sub> - V<sub>c</sub>)1000", "ϕ<sub>s</sub>f<sub>y</sub>d<sub>v</sub>cotθ")}]`),
+        reportFormula(`${ffrac("A<sub>v</sub>", "s")}<sub>beam req</sub> = ${ffrac(`(${fmt(s.maxV,2)} - ${fmt(s.Vc,2)})1000`, `${fmt(i.phiS,2)}(${fmt(i.fy,0)})(${fmt(sec.dv,1)})(${fmt(s.cotTheta,3)})`)}`),
+        reportResult(`${ffrac("A<sub>v</sub>", "s")}<sub>beam req</sub> = ${fmt(beamReqPerMm,3)} mm<sup>2</sup>/mm = ${fmt(s.beamAvReqPerM,0)} mm<sup>2</sup>/m`),
+        reportFormula(`A<sub>v,set</sub> = ${fmt(i.stirrupLegs,0)}(${fmt(stirrup.area,0)}) = ${fmt(s.stirrupAvSet,0)} mm<sup>2</sup>`),
+        reportFormula(`${ffrac("A<sub>v</sub>", "s")}<sub>selected</sub> = ${ffrac(fmt(s.stirrupAvSet,0), fmt(i.stirrupSpacing,0))} = ${fmt(primaryPerMm,3)} mm<sup>2</sup>/mm = ${fmt(s.stirrupAvPerM,0)} mm<sup>2</sup>/m`),
+        reportFormula(`V<sub>s</sub> = ${ffrac("ϕ<sub>s</sub>A<sub>v,set</sub>f<sub>y</sub>d<sub>v</sub>cotθ", "s")}`),
+        reportResult(`V<sub>s</sub> = ${fmt(s.Vs,2)} kN; &nbsp; V<sub>r</sub> = V<sub>c</sub> + V<sub>s</sub> = ${fmt(s.Vr,2)} kN`),
+        reportFormula(`V<sub>r,max</sub> = ${ffrac("0.25ϕ<sub>c</sub>f′<sub>c</sub>b d<sub>v</sub>", "1000")} = ${fmt(s.VrMax,2)} kN`),
+        reportResult(`Vertical shear strength check: V<sub>r</sub> ${s.Vr >= s.maxV ? "≥" : "<"} V<sub>f</sub> → ${reportStatusHtml(s.verticalStrengthOk)}`, s.verticalStrengthOk)
       ]
     },
     {
-      title: "6. Cold-joint interface shear-transfer check",
-      lines: [
-        reportLine("Interface demand", `vf=${fmt(s.maxStress,4)} MPa from ${qModel}`),
-        reportLine("Required clamping ratio", `ρv = max[0, (vf/(λϕc) - c) / (μ fy)] = ${fmt(s.rhoReq,6)}`),
-        reportLine("Required crossing steel", `(Av/s)interface = ρv b × 1000 = ${fmt(s.interfaceAvReqPerM,2)} mm²/m`),
-        reportLine("Concrete stress limit", `vlimit = 0.25ϕc f'c = ${fmt(s.concreteLimit,3)} MPa; vf=${fmt(s.maxStress,4)} MPa → ${reportStatus(s.maxStress <= s.concreteLimit)}`),
-        reportLine("Interface stress resistance", `vr = min[0.25ϕc f'c, λϕc(c + μρv,prov fy)] = ${fmt(s.interfaceStressResistance,4)} MPa`)
+      title: "6. Stirrup spacing and minimum shear steel checks",
+      blocks: [
+        reportFormula(`V<sub>threshold</sub> = ${ffrac("0.125λϕ<sub>c</sub>√f′<sub>c</sub>b d<sub>v</sub>", "1000")} = ${fmt(s.highShearThreshold,2)} kN`),
+        reportFormula(`High-shear spacing limit: s ≤ min(0.35d<sub>v</sub>, 300) = min(${fmt(0.35*sec.dv,1)}, 300)`),
+        reportFormula(`Low-shear spacing limit: s ≤ min(0.70d<sub>v</sub>, 600) = min(${fmt(0.70*sec.dv,1)}, 600)`),
+        reportResult(`Global governing s<sub>max</sub> = ${fmt(s.sMax,1)} mm; selected input s = ${fmt(i.stirrupSpacing,0)} mm → ${reportStatusHtml(s.verticalSpacingOk)}`, s.verticalSpacingOk),
+        reportFormula(`A<sub>v,min</sub> = ${ffrac("0.06√f′<sub>c</sub>b s", "f<sub>y</sub>")} = ${ffrac(`0.06(${fmt(Math.sqrt(i.fc),3)})(${fmt(i.b,0)})(${fmt(i.stirrupSpacing,0)})`, fmt(i.fy,0))}`),
+        reportResult(`A<sub>v,min</sub> = ${fmt(s.AvMin,1)} mm<sup>2</sup>; provided A<sub>v,set</sub> = ${fmt(s.stirrupAvSet,1)} mm<sup>2</sup> → ${reportStatusHtml(s.minSteelOk)}`, s.minSteelOk),
+        reportNote("For the final zoned design, spacing and minimum steel are re-evaluated using each zone's selected spacing.")
       ]
     },
     {
-      title: "7. Conservative steel allocation / additional dowel check",
-      lines: [
-        reportLine("Allocation method", i.allocation === "balance" ? "Subtract beam shear steel from available primary stirrup steel before crediting interface shear." : "Credit full crossing stirrup steel to the interface check."),
-        reportLine("Unused primary stirrup balance", `Av,unused = ${fmt(s.unusedStirrupAv,2)} mm²/m`),
-        reportLine("Additional interface steel required", `Av,add,req = max[0, Av,interface,req - Av,unused] = ${fmt(s.additionalInterfaceReq,2)} mm²/m`),
-        reportLine("Additional dowel/hairpin provided", `Av,dowel = ${fmt(i.dowelLegs,0)} × ${fmt(dowel.area,0)} / ${fmt(i.dowelSpacing,0)} × 1000 = ${fmt(s.dowelAvPerM,2)} mm²/m`),
-        reportLine("Total interface steel available", `Av,total = Av,unused + Av,dowel = ${fmt(s.totalInterfaceAvailable,2)} mm²/m → ${reportStatus(s.interfaceOk)}`)
+      title: "7. Cold-joint interface shear-transfer check",
+      blocks: [
+        reportText(`Interface condition: <strong>${interfaceConditionLabel(i.interfaceCondition)}</strong>. The selected coefficients are c=${fmt(i.cohesion,2)} MPa and μ=${fmt(i.mu,2)}.`),
+        reportFormula(`v<sub>r</sub> = λϕ<sub>c</sub>(c + μρ<sub>v</sub>f<sub>y</sub>)`),
+        reportFormula(`ρ<sub>v,req</sub> = ${ffrac("v<sub>f</sub>/(λϕ<sub>c</sub>) - c", "μf<sub>y</sub>")} = ${ffrac(`${fmt(s.maxStress,4)}/(${fmt(i.lambda,2)}×${fmt(i.phiC,2)}) - ${fmt(i.cohesion,2)}`, `${fmt(i.mu,2)}(${fmt(i.fy,0)})`)}`),
+        reportResult(`ρ<sub>v,req</sub> = ${fmt(s.rhoReq,6)}`),
+        reportFormula(`${ffrac("A<sub>v</sub>", "s")}<sub>interface req</sub> = ρ<sub>v,req</sub>b = ${fmt(s.rhoReq,6)}(${fmt(i.b,0)})`),
+        reportResult(`${ffrac("A<sub>v</sub>", "s")}<sub>interface req</sub> = ${fmt(interfaceReqPerMm,3)} mm<sup>2</sup>/mm = ${fmt(s.interfaceAvReqPerM,0)} mm<sup>2</sup>/m`),
+        reportFormula(`v<sub>limit</sub> = 0.25ϕ<sub>c</sub>f′<sub>c</sub> = 0.25(${fmt(i.phiC,2)})(${fmt(i.fc,1)})`),
+        reportResult(`v<sub>limit</sub> = ${fmt(s.concreteLimit,3)} MPa; demand v<sub>f</sub> = ${fmt(s.maxStress,4)} MPa → ${reportStatusHtml(s.maxStress <= s.concreteLimit)}`, s.maxStress <= s.concreteLimit)
       ]
     },
     {
-      title: "8. Shear zone design schedule",
-      lines: (s.zoneSchedule || []).map(z => reportLine(
-        `${z.name} (${fmt(z.x1,2)}–${fmt(z.x2,2)} m)`,
-        `${fmt(i.stirrupLegs,0)} legs ${i.stirrupBar} @ ${fmt(z.primarySpacing,0)} mm${z.dowelSpacing ? `; add ${fmt(i.dowelLegs,0)} legs ${i.dowelBar} @ ${fmt(z.dowelSpacing,0)} mm` : z.addReq > 1e-9 ? `; added interface steel required ${fmt(z.addReq,0)} mm²/m` : "; no added dowels"}`,
-        `Governing station x=${fmt(z.gov.station.x,3)} m; |Vf|=${fmt(Math.abs(z.gov.station.V),1)} kN; |Mf|=${fmt(Math.abs(z.gov.station.M),1)} kN·m; status=${reportStatus(z.ok)}`
-      ))
+      title: "8. Conservative steel allocation and added dowel requirement",
+      blocks: [
+        reportText(i.allocation === "balance"
+          ? "The selected allocation method subtracts the vertical beam shear steel demand from the crossing stirrup steel before crediting the remaining clamping steel to the interface. This avoids double-counting the same stirrup yield force for two incompatible mechanisms."
+          : "The selected allocation method credits the full crossing stirrup steel to the interface check."),
+        reportFormula(`${ffrac("A<sub>v</sub>", "s")}<sub>prov</sub> = ${ffrac("A<sub>v,set</sub>", "s")} = ${ffrac(fmt(s.stirrupAvSet,0), fmt(i.stirrupSpacing,0))}`),
+        reportResult(`${ffrac("A<sub>v</sub>", "s")}<sub>prov</sub> = ${fmt(primaryPerMm,3)} mm<sup>2</sup>/mm = ${fmt(s.stirrupAvPerM,0)} mm<sup>2</sup>/m`),
+        reportFormula(`${ffrac("A<sub>v</sub>", "s")}<sub>unused</sub> = ${ffrac("A<sub>v</sub>", "s")}<sub>prov</sub> - ${ffrac("A<sub>v</sub>", "s")}<sub>beam req</sub> = ${fmt(s.stirrupAvPerM,0)} - ${fmt(s.beamAvReqPerM,0)}`),
+        reportResult(`${ffrac("A<sub>v</sub>", "s")}<sub>unused</sub> = ${fmt(s.unusedStirrupAv,0)} mm<sup>2</sup>/m`),
+        reportFormula(`${ffrac("A<sub>v</sub>", "s")}<sub>add req</sub> = max[0, ${ffrac("A<sub>v</sub>", "s")}<sub>interface req</sub> - ${ffrac("A<sub>v</sub>", "s")}<sub>unused</sub>]`),
+        reportResult(`${ffrac("A<sub>v</sub>", "s")}<sub>add req</sub> = ${fmt(addReqPerMm,3)} mm<sup>2</sup>/mm = ${fmt(s.additionalInterfaceReq,0)} mm<sup>2</sup>/m`),
+        reportFormula(`${ffrac("A<sub>v</sub>", "s")}<sub>dowel</sub> = ${ffrac(`${fmt(i.dowelLegs,0)}(${fmt(dowel.area,0)})`, fmt(i.dowelSpacing,0))}`),
+        reportResult(`${ffrac("A<sub>v</sub>", "s")}<sub>dowel</sub> = ${fmt(s.dowelAvPerM,0)} mm<sup>2</sup>/m`),
+        reportFormula(`${ffrac("A<sub>v</sub>", "s")}<sub>available</sub> = ${ffrac("A<sub>v</sub>", "s")}<sub>unused</sub> + ${ffrac("A<sub>v</sub>", "s")}<sub>dowel</sub>`),
+        reportResult(`${ffrac("A<sub>v</sub>", "s")}<sub>available</sub> = ${fmt(s.totalInterfaceAvailable,0)} mm<sup>2</sup>/m → ${reportStatusHtml(s.interfaceOk)}`, s.interfaceOk),
+        reportNote("The zone schedule below repeats this allocation locally using each zone's selected spacing and governing station.")
+      ]
     },
     {
-      title: "9. Utilization summary",
-      lines: [
-        reportLine("Flexure", `Mf/Mr = ${fmt(s.flexRatio,3)} → ${reportStatus(s.flexUtilizationOk)}`),
-        reportLine("Beam shear", `Vbeam/Vr,beam = ${fmt(s.beamShearRatio,3)}`),
-        reportLine("Interface shear", `Vinterface/Vr,interface = ${fmt(s.interfaceShearRatio,3)}`),
-        reportLine("Combined shear utilization", `Vf/Vr = beam + interface = ${fmt(s.combinedShearRatio,3)} → ${reportStatus(s.shearUtilizationOk)}`),
-        ...(st && local ? [reportLine("Selected station", `x=${fmt(st.x,3)} m; zone ${local.zone}; Vf=${fmt(st.V,2)} kN; Mf=${fmt(st.M,2)} kN·m; q=${fmt(st.qDesign,2)} kN/m; v=${fmt(st.vInterface,4)} MPa`)] : [])
+      title: "9. Shear-zone design schedule and local utilization",
+      blocks: [
+        reportText("Each design zone is governed by the worst station inside that zone. Adjacent ranges with the same reinforcement are consolidated into one schedule row."),
+        reportTable(["Zone", "x range", "Length", "Primary shear reinforcement", "Added interface dowels", "Gov |Vf|", "Shear utilization", "Status"], zoneRows),
+        reportText("Local allocation summary by zone, in mm²/m:"),
+        reportTable(["Zone", "x range", "Primary Av/s", "Beam req", "Unused", "Interface req", "Add req", "Dowel Av/s", "Available"], zoneCalcRows)
+      ]
+    },
+    {
+      title: "10. Final utilization summary",
+      blocks: [
+        reportFormula(`${ffrac("M<sub>f</sub>", "M<sub>r</sub>")} = ${fmt(s.flexRatio,3)} → ${reportStatusHtml(s.flexUtilizationOk)}`),
+        reportFormula(`${ffrac("V<sub>beam</sub>", "V<sub>r,beam</sub>")} = ${fmt(s.beamShearRatio,3)}`),
+        reportFormula(`${ffrac("V<sub>interface</sub>", "V<sub>r,interface</sub>")} = ${fmt(s.interfaceShearRatio,3)}`),
+        reportFormula(`${ffrac("V<sub>f</sub>", "V<sub>r</sub>")}<sub>combined</sub> = ${fmt(s.beamShearRatio,3)} + ${fmt(s.interfaceShearRatio,3)} = ${fmt(s.combinedShearRatio,3)}`),
+        reportResult(`Combined shear utilization = ${fmt(s.combinedShearRatio,3)} → ${reportStatusHtml(s.shearUtilizationOk)}`, s.shearUtilizationOk),
+        ...(st && local ? [reportNote(`Currently selected station: x=${fmt(st.x,3)} m; zone ${local.zone}; Vf=${fmt(st.V,2)} kN; Mf=${fmt(st.M,2)} kN·m; q=${fmt(st.qDesign,2)} kN/m; v=${fmt(st.vInterface,4)} MPa.`)] : [])
       ]
     }
   ];
@@ -1474,18 +1614,40 @@ function renderReport(r) {
   const target = $("calculationReport");
   if (!target) return;
   const sections = buildCalculationReportSections(r);
-  target.innerHTML = sections.map((sec, idx) => `
-    <details class="report-section" ${idx < 3 ? "open" : ""}>
+  target.innerHTML = sections.map((sec) => `
+    <details class="report-section enhanced-report-section" open>
       <summary>${sec.title}</summary>
-      <div class="report-lines">
-        ${sec.lines.map(line => `
-          <div class="report-row">
-            <div class="report-label">${line.label}</div>
-            <div class="report-value">${line.value}</div>
-            ${line.note ? `<div class="report-subnote">${line.note}</div>` : ""}
-          </div>`).join("")}
+      <div class="report-blocks">
+        ${sec.blocks.map(renderReportBlock).join("")}
       </div>
     </details>`).join("");
+}
+
+function renderReportBlock(block) {
+  if (block.type === "text") return `<p class="report-paragraph">${block.html}</p>`;
+  if (block.type === "note") return `<div class="report-follow-note">${block.html}</div>`;
+  if (block.type === "formula") return `<div class="report-equation">${block.html}</div>`;
+  if (block.type === "result") {
+    const cls = block.ok === null ? "" : block.ok ? " ok" : " ng";
+    return `<div class="report-result${cls}">${block.html}</div>`;
+  }
+  if (block.type === "table") {
+    return `<div class="report-table-wrap"><table class="report-calc-table"><thead><tr>${block.headers.map(h => `<th>${h}</th>`).join("")}</tr></thead><tbody>${block.rows.map(row => `<tr>${row.map(cell => `<td>${cell}</td>`).join("")}</tr>`).join("")}</tbody></table></div>`;
+  }
+  return "";
+}
+
+function plainReportText(html) {
+  return String(html)
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<sup>(.*?)<\/sup>/gi, "^$1")
+    .replace(/<sub>(.*?)<\/sub>/gi, "_$1")
+    .replace(/<span class="frac"><span>(.*?)<\/span><span>(.*?)<\/span><\/span>/gi, "($1)/($2)")
+    .replace(/<[^>]+>/g, "")
+    .replace(/&nbsp;/g, " ")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&amp;/g, "&");
 }
 
 function reportMarkdown(r) {
@@ -1498,10 +1660,20 @@ function reportMarkdown(r) {
   ];
   sections.forEach(sec => {
     lines.push(`## ${sec.title}`, "");
-    sec.lines.forEach(item => {
-      lines.push(`- **${item.label}:** ${item.value}${item.note ? ` (${item.note})` : ""}`);
+    sec.blocks.forEach(block => {
+      if (block.type === "text" || block.type === "note") {
+        lines.push(plainReportText(block.html), "");
+      } else if (block.type === "formula") {
+        lines.push(`$$ ${plainReportText(block.html)} $$`, "");
+      } else if (block.type === "result") {
+        lines.push(`**${plainReportText(block.html)}**`, "");
+      } else if (block.type === "table") {
+        lines.push(`| ${block.headers.join(" | ")} |`);
+        lines.push(`| ${block.headers.map(() => "---").join(" | ")} |`);
+        block.rows.forEach(row => lines.push(`| ${row.map(cell => plainReportText(cell)).join(" | ")} |`));
+        lines.push("");
+      }
     });
-    lines.push("");
   });
   return lines.join("\n");
 }

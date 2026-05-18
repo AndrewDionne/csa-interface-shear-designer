@@ -162,6 +162,41 @@
         </div>
       </details>
 
+
+      <details open>
+        <summary>Shear zone design</summary>
+        <div class="grid two">
+          <label>Zone design mode
+            <select id="zoneDesignMode">
+              <option value="auto" selected>Auto-zone by demand envelope</option>
+              <option value="uniform">Uniform selected spacing</option>
+              <option value="manual">Manual support-zone length</option>
+            </select>
+          </label>
+          <label>Zone design strategy
+            <select id="zoneDesignStrategy">
+              <option value="primaryFirst" selected>Tighten primary stirrups first</option>
+              <option value="addDowels">Keep primary spacing + add dowels</option>
+            </select>
+          </label>
+          <label>Minimum practical spacing, mm
+            <input id="zoneMinSpacing" type="number" step="25" value="100" />
+          </label>
+          <label>Maximum practical spacing, mm
+            <input id="zoneMaxSpacing" type="number" step="25" value="450" />
+          </label>
+          <label>Maximum auto zone count
+            <input id="zoneMaxCount" type="number" min="1" max="9" step="1" value="5" />
+          </label>
+          <label>Minimum zone length, m
+            <input id="zoneMinLength" type="number" min="0" step="0.25" value="1.0" />
+          </label>
+          <label>Manual support zone length, m
+            <input id="manualSupportZoneLength" type="number" min="0" step="0.25" value="3.0" />
+          </label>
+        </div>
+      </details>
+
       <div class="button-row">
         <button class="primary-button" id="runButton">Run analysis + design check</button>
         <button class="secondary-button" id="autoDesignButton" type="button">Auto design</button>
@@ -216,12 +251,34 @@
         </div>
       </section>
 
+      <section class="panel zone-schedule-panel">
+        <div class="panel-title">
+          <h2>Shear zone design schedule</h2>
+          <div class="small-muted">Zones are generated from the local demand envelope and spacing/minimum steel limits.</div>
+        </div>
+        <div id="zoneSchedule" class="zone-schedule"></div>
+      </section>
+
       <section class="panel">
         <div class="panel-title">
           <h2>Design checks</h2>
           <div class="small-muted">Uses a conservative steel-allocation option to avoid double-counting stirrup steel.</div>
         </div>
         <div class="checks-grid" id="checksGrid"></div>
+      </section>
+
+
+
+      <section class="panel report-panel" id="reportPanel">
+        <div class="panel-title">
+          <h2>Calculation report</h2>
+          <div class="report-actions">
+            <button class="ghost-button" id="copyReportMarkdown" type="button">Copy Markdown</button>
+            <button class="ghost-button" id="printReport" type="button">Print / Save PDF</button>
+          </div>
+        </div>
+        <div class="small-muted report-note">Step-by-step calculations update from the current inputs and selected reinforcement.</div>
+        <div id="calculationReport" class="calculation-report"></div>
       </section>
 
       <section class="panel">

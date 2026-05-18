@@ -629,3 +629,196 @@ code {
 @media (max-width: 900px) {
   .beam-slider-overlay { position: static; width: 100% !important; left: auto !important; top: auto !important; margin: 10px 0 6px; }
 }
+
+/* v10 calculation report */
+.report-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.report-note {
+  margin-top: -6px;
+  margin-bottom: 12px;
+}
+
+.calculation-report {
+  display: grid;
+  gap: 10px;
+}
+
+.report-section {
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 0;
+  overflow: hidden;
+  background: #fbfdff;
+}
+
+.report-section summary {
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+  background: #eef4fb;
+  padding: 10px 12px;
+  color: #132f4c;
+}
+
+.report-lines {
+  display: grid;
+  gap: 0;
+  padding: 4px 0;
+}
+
+.report-row {
+  display: grid;
+  grid-template-columns: minmax(160px, 245px) 1fr;
+  gap: 10px 14px;
+  padding: 9px 12px;
+  border-top: 1px solid #edf2f7;
+  align-items: start;
+}
+
+.report-row:first-child { border-top: 0; }
+
+.report-label {
+  font-weight: 850;
+  color: #34495e;
+  font-size: 0.82rem;
+}
+
+.report-value {
+  color: #12202f;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  font-size: 0.81rem;
+  line-height: 1.45;
+}
+
+.report-subnote {
+  grid-column: 2;
+  color: var(--muted);
+  font-size: 0.78rem;
+  line-height: 1.35;
+  margin-top: -4px;
+}
+
+@media (max-width: 760px) {
+  .report-row {
+    grid-template-columns: 1fr;
+  }
+  .report-subnote { grid-column: 1; }
+}
+
+@media print {
+  body { background: white; }
+  .app-header,
+  .inputs-panel,
+  .graphics-panel,
+  .checks-grid,
+  .table-wrap,
+  .report-actions,
+  .small-muted:not(.report-note) {
+    display: none !important;
+  }
+  .layout {
+    display: block;
+    padding: 0;
+  }
+  .main-results {
+    display: block;
+  }
+  .panel {
+    box-shadow: none;
+    border: 0;
+    border-radius: 0;
+    padding: 0;
+    margin: 0 0 18px;
+  }
+  .report-panel {
+    display: block !important;
+  }
+  .report-section {
+    break-inside: avoid;
+    page-break-inside: avoid;
+    margin-bottom: 8px;
+  }
+  .report-section summary {
+    background: #f2f2f2 !important;
+  }
+}
+
+/* v11 shear-zone schedule + conditional input cleanup */
+label[hidden] {
+  display: none !important;
+}
+
+.zone-schedule {
+  display: grid;
+  gap: 10px;
+}
+
+.zone-summary {
+  color: var(--muted);
+  font-size: 0.82rem;
+  line-height: 1.35;
+}
+
+.zone-table-wrap {
+  max-height: 360px;
+}
+
+.zone-table th,
+.zone-table td {
+  text-align: left;
+  vertical-align: top;
+  white-space: nowrap;
+}
+
+.zone-table td:nth-child(7),
+.zone-table td:nth-child(8) {
+  white-space: normal;
+  min-width: 170px;
+}
+
+.zone-table tr.ok td {
+  background: #fbfffc;
+}
+
+.zone-table tr.ng td {
+  background: #fff7f6;
+}
+
+.mini-status {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 42px;
+  padding: 3px 7px;
+  border-radius: 999px;
+  font-weight: 900;
+  font-size: 0.72rem;
+}
+
+.mini-status.ok {
+  background: #e6f4ea;
+  color: var(--good);
+}
+
+.mini-status.ng {
+  background: #fce8e6;
+  color: var(--bad);
+}
+
+#beamElevation {
+  touch-action: none;
+  user-select: none;
+}
+
+.beam-slider-overlay input[type=range] {
+  cursor: grab;
+}
+
+.beam-slider-overlay input[type=range]:active {
+  cursor: grabbing;
+}

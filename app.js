@@ -542,8 +542,44 @@ function miniPathData(stations, key, left, yTop, plotW, plotH, absMode, positive
     return positiveDown ? yTop + ratio * plotH : yTop + (1 - ratio) * plotH;
   };
   const valueAt = d => absMode ? Math.abs(d[key]) : d[key];
-  const path = stations.map((d, i) => `${i === 0 ? "M" : "L"} ${sx(d.x).toFixed(2)} ${sy(valueAt(d)).toFixed(2)}`).join(" ");
-  return { path, zeroY: sy(0), ymax, ymin, sx, sy };
+  const points = stations.map(d => ({ x: d.x, value: valueAt(d), sx: sx(d.x), sy: sy(valueAt(d)) }));
+  const path = points.map((pt, i) => `${i === 0 ? "M" : "L"} ${pt.sx.toFixed(2)} ${pt.sy.toFixed(2)}`).join(" ");
+  return { path, points, zeroY: sy(0), ymax, ymin, sx, sy, valueAt };
+}
+
+function fillToZeroPaths(points, zeroY, absMode) {
+  if (!points.length) return "";
+  if (absMode) {
+    const curve = points.map((pt, i) => `${i === 0 ? "M" : "L"} ${pt.sx.toFixed(2)} ${pt.sy.toFixed(2)}`).join(" ");
+    return `${curve} L ${points[points.length - 1].sx.toFixed(2)} ${zeroY.toFixed(2)} L ${points[0].sx.toFixed(2)} ${zeroY.toFixed(2)} Z`;
+  }
+
+  const paths = [];
+  let seg = [];
+  const pushSeg = () => {
+    if (seg.length < 2) { seg = []; return; }
+    const curve = seg.map((pt, i) => `${i === 0 ? "M" : "L"} ${pt.sx.toFixed(2)} ${pt.sy.toFixed(2)}`).join(" ");
+    paths.push(`${curve} L ${seg[seg.length - 1].sx.toFixed(2)} ${zeroY.toFixed(2)} L ${seg[0].sx.toFixed(2)} ${zeroY.toFixed(2)} Z`);
+    seg = [];
+  };
+
+  for (let i = 0; i < points.length - 1; i++) {
+    const a = points[i];
+    const b = points[i + 1];
+    if (seg.length === 0) seg.push(a);
+    const crosses = (a.value < 0 && b.value > 0) || (a.value > 0 && b.value < 0);
+    if (crosses) {
+      const t = Math.abs(a.value) / Math.max(1e-12, Math.abs(a.value) + Math.abs(b.value));
+      const xz = a.sx + (b.sx - a.sx) * t;
+      const zeroPoint = { sx: xz, sy: zeroY, value: 0 };
+      seg.push(zeroPoint);
+      pushSeg();
+      seg.push(zeroPoint);
+    }
+    seg.push(b);
+  }
+  pushSeg();
+  return paths.join(" ");
 }
 
 function buildMiniDiagram(r, key, label, unit, yTop, left, plotW, plotH, absMode, options = {}) {
@@ -552,17 +588,18 @@ function buildMiniDiagram(r, key, label, unit, yTop, left, plotW, plotH, absMode
   const maxVal = Math.max(...r.stations.map(s => Math.abs(s[key])));
   const bg = options.bg || "#f7fafc";
   const stroke = options.stroke || "#1f6feb";
+  const fill = options.fill || stroke;
+  const fillPath = fillToZeroPaths(p.points, p.zeroY, absMode);
   return `
     <g class="mini-demand-diagram">
       <rect x="${left}" y="${yTop}" width="${plotW}" height="${plotH}" rx="8" fill="${bg}" stroke="#dbe3ec"/>
       <text x="${left}" y="${yTop - 10}" font-size="12" font-weight="850" fill="#34495e">${label}</text>
       <text x="${left + 112}" y="${yTop - 10}" font-size="11" fill="#667587">max ${fmt(maxVal, 1)} ${unit}</text>
-      <line x1="${left}" y1="${yTop + plotH}" x2="${left + plotW}" y2="${yTop + plotH}" stroke="#c7d1dc"/>
-      ${!absMode ? `<line x1="${left}" y1="${p.zeroY}" x2="${left + plotW}" y2="${p.zeroY}" stroke="#c7d1dc" stroke-dasharray="5 5"/>` : ""}
+      ${!absMode ? `<line x1="${left}" y1="${p.zeroY}" x2="${left + plotW}" y2="${p.zeroY}" stroke="#c7d1dc" stroke-dasharray="5 5"/>` : `<line x1="${left}" y1="${p.zeroY}" x2="${left + plotW}" y2="${p.zeroY}" stroke="#c7d1dc"/>`}
+      <path d="${fillPath}" fill="${fill}" opacity="0.16"/>
       <path d="${p.path}" fill="none" stroke="${stroke}" stroke-width="2.7"/>
       <text x="${left + 8}" y="${yTop + 17}" font-size="10.5" fill="#667587">${fmt(p.ymax, 1)}</text>
       <text x="${left + 8}" y="${yTop + plotH - 7}" font-size="10.5" fill="#667587">${fmt(p.ymin, 1)}</text>
-      ${positiveDown ? `<text x="${left + plotW - 8}" y="${yTop + plotH - 8}" text-anchor="end" font-size="10.5" fill="#667587">+ sagging plotted downward, tension side</text>` : ""}
     </g>`;
 }
 
@@ -570,20 +607,19 @@ function buildMiniInterfaceDiagram(r, yTop, left, plotW, plotH) {
   const qMax = Math.max(...r.stations.map(s => Math.abs(s.qDesign)));
   const vMax = Math.max(...r.stations.map(s => Math.abs(s.vInterface)));
   const local = r.stations.map(s => ({ x: s.x, qNorm: qMax > 0 ? Math.abs(s.qDesign) / qMax : 0 }));
-  const p = miniPathData(local, "qNorm", left, yTop, plotW, plotH, false, false);
-  const fillPath = `${p.path} L ${left + plotW} ${yTop + plotH} L ${left} ${yTop + plotH} Z`;
+  const p = miniPathData(local, "qNorm", left, yTop, plotW, plotH, true, false);
+  const fillPath = fillToZeroPaths(p.points, p.zeroY, true);
   return `
     <g class="mini-demand-diagram">
       <rect x="${left}" y="${yTop}" width="${plotW}" height="${plotH}" rx="8" fill="#fffaf2" stroke="#ead7b5"/>
       <text x="${left}" y="${yTop - 10}" font-size="12" font-weight="850" fill="#34495e">Interface q / v demand</text>
       <text x="${left + 150}" y="${yTop - 10}" font-size="11" fill="#667587">max ${fmt(qMax, 1)} kN/m = ${fmt(vMax, 3)} MPa</text>
-      <line x1="${left}" y1="${yTop + plotH}" x2="${left + plotW}" y2="${yTop + plotH}" stroke="#d9c4a0"/>
-      <path d="${fillPath}" fill="#f3c77b" opacity="0.18"/>
+      <line x1="${left}" y1="${p.zeroY}" x2="${left + plotW}" y2="${p.zeroY}" stroke="#d9c4a0"/>
+      <path d="${fillPath}" fill="#b26a00" opacity="0.18"/>
       <path d="${p.path}" fill="none" stroke="#b26a00" stroke-width="2.7"/>
       <text x="${left + 8}" y="${yTop + 17}" font-size="10.5" fill="#806000">q: kN/m</text>
       <text x="${left + plotW - 8}" y="${yTop + 17}" text-anchor="end" font-size="10.5" fill="#806000">v: MPa</text>
       <text x="${left + 8}" y="${yTop + plotH - 7}" font-size="10.5" fill="#806000">0</text>
-      <text x="${left + plotW - 8}" y="${yTop + plotH - 7}" text-anchor="end" font-size="10.5" fill="#806000">same curve; v = q / b</text>
     </g>`;
 }
 
@@ -613,7 +649,7 @@ function buildShearZones(r, left, plotW, L, y) {
 }
 
 function renderElevation(r) {
-  const width = 980, height = 610, left = 78, right = 42;
+  const width = 980, height = 640, left = 78, right = 42;
   const L = beamLength(r.inputs);
   const plotW = width - left - right;
   const supports = supportLocations(r.inputs);
@@ -630,6 +666,7 @@ function renderElevation(r) {
   const zoneY = bottomY + 34;
 
   let arrows = "";
+  const wLabel = r.inputs.Wf !== 0 ? `<text x="${left + 3}" y="${topY - 22}" font-size="10.5" fill="#1f6feb">Wf=${fmt(r.inputs.Wf,1)} kN/m</text>` : "";
   const nArrows = 14;
   if (r.inputs.Wf !== 0) {
     for (let i = 0; i <= nArrows; i++) {
@@ -660,9 +697,9 @@ function renderElevation(r) {
     : `<text x="${left + plotW/2}" y="${bottomY + 67}" text-anchor="middle" font-size="12">L=${fmt(r.inputs.L1,2)} m</text>`;
 
   const diagramTop = Math.max(240, zoneY + 44);
-  const miniM = buildMiniDiagram(r, "M", "Mf diagram", "kN·m", diagramTop, left, plotW, 86, false, { positiveDown: true, bg: "#f7fbff" });
-  const miniV = buildMiniDiagram(r, "V", "Vf diagram", "kN", diagramTop + 112, left, plotW, 86, false, { bg: "#f7fafc" });
-  const miniInterface = buildMiniInterfaceDiagram(r, diagramTop + 224, left, plotW, 92);
+  const miniM = buildMiniDiagram(r, "M", "Mf diagram", "kN·m", diagramTop, left, plotW, 96, false, { positiveDown: true, bg: "#f7fbff" });
+  const miniV = buildMiniDiagram(r, "V", "Vf diagram", "kN", diagramTop + 122, left, plotW, 96, false, { bg: "#f7fafc" });
+  const miniInterface = buildMiniInterfaceDiagram(r, diagramTop + 244, left, plotW, 104);
 
   $("beamElevation").innerHTML = `<svg viewBox="0 0 ${width} ${height}" role="img" aria-label="Beam elevation with aligned demand diagrams">
     <defs>
@@ -670,8 +707,7 @@ function renderElevation(r) {
       <marker id="arrowRed" markerWidth="8" markerHeight="8" refX="4" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 Z" fill="#b3261e"/></marker>
     </defs>
     <text x="${left}" y="18" font-size="14" font-weight="800">Elevation: ${labelBeamSystem(r.inputs.beamSystem)}</text>
-    <text x="${left + 245}" y="18" font-size="11" fill="#667587">Method: simplified CSA-style beam shear + ${demandModelLabel(r.inputs.interfaceDemandModel)} interface demand</text>
-    <text x="${left}" y="36" font-size="11" fill="#667587">Wf=${fmt(r.inputs.Wf,1)} kN/m</text>
+    ${wLabel}
     ${arrows}
     ${pointSvg}
     <rect x="${left}" y="${topY}" width="${plotW}" height="${slabH}" rx="4" fill="#dce9f8" stroke="#5f6f82"/>

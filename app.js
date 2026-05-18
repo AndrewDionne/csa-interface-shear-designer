@@ -458,12 +458,10 @@ function computeFlexuralEstimate(inputs, section, maxMabs) {
 function render(result) {
   renderSummary(result);
   renderChecks(result);
-  updateStationControls(result);
   renderElevation(result);
   renderCrossSection(result);
   renderCharts(result);
   renderTable(result);
-  renderStationReadout(result);
 
   const ok = result.summary.verticalStrengthOk && result.summary.verticalSpacingOk && result.summary.minSteelOk && result.summary.interfaceOk && result.summary.flexUtilizationOk && result.summary.shearUtilizationOk;
   const hasWarning = !result.summary.flex.ok;
@@ -518,35 +516,6 @@ function localDesignForStation(r, station) {
   const shearRatio = beamRatio + interfaceRatio;
   const flexRatio = Math.abs(station.M) / Math.max(1e-9, s.flex.Mr);
   return { beamAvReqPerM, interfaceAvReqPerM, unusedStirrupAv, addReq, totalAvailable, beamRatio, interfaceRatio, shearRatio, flexRatio, zone: stationZone(r, station) };
-}
-
-function updateStationControls(r) {
-  const slider = $("stationSlider");
-  if (!slider || !r || !r.stations.length) return;
-  const oldX = activeStation(r)?.x;
-  selectedStationIndex = clamp(selectedStationIndex, 0, r.stations.length - 1);
-  if (oldX !== undefined && Number.isFinite(oldX)) {
-    let closest = 0;
-    for (let i = 1; i < r.stations.length; i++) {
-      if (Math.abs(r.stations[i].x - oldX) < Math.abs(r.stations[closest].x - oldX)) closest = i;
-    }
-    selectedStationIndex = closest;
-  }
-  slider.max = String(r.stations.length - 1);
-  slider.value = String(selectedStationIndex);
-}
-
-function renderStationReadout(r) {
-  const el = $("stationReadout");
-  if (!el || !r) return;
-  const st = activeStation(r);
-  if (!st) return;
-  const local = localDesignForStation(r, st);
-  const zoneCls = local.zone === "A" ? "zone-a" : "zone-b";
-  el.innerHTML = `<strong>x=${fmt(st.x, 3)} m</strong> · <span class="${zoneCls}">Shear zone ${local.zone}</span><br>` +
-    `Vf=${fmt(st.V, 1)} kN · Mf=${fmt(st.M, 1)} kN·m · q=${fmt(st.qDesign, 1)} kN/m · v=${fmt(st.vInterface, 3)} MPa<br>` +
-    `Local utilization: Mf/Mr=${fmt(local.flexRatio, 2)} · Vf/Vr=${fmt(local.shearRatio, 2)} ` +
-    `(beam ${fmt(local.beamRatio, 2)} + interface ${fmt(local.interfaceRatio, 2)})`;
 }
 
 function renderSummary(r) {
@@ -658,39 +627,60 @@ function buildMiniDiagram(r, key, label, unit, yTop, left, plotW, plotH, absMode
   const stroke = options.stroke || "#1f6feb";
   const fill = options.fill || stroke;
   const fillPath = fillToZeroPaths(p.points, p.zeroY, absMode);
+  const st = options.station || null;
+  let marker = "";
+  let dynamicText = "";
+  if (st) {
+    const raw = absMode ? Math.abs(st[key]) : st[key];
+    const sx0 = p.sx(st.x);
+    const sy0 = p.sy(raw);
+    const labelX = Math.min(left + plotW - 8, Math.max(left + 8, sx0 + 12));
+    marker = `<circle cx="${sx0}" cy="${sy0}" r="4.2" fill="${stroke}" stroke="#fff" stroke-width="1.5"/>`;
+    dynamicText = `<text x="${left + plotW - 8}" y="${yTop - 10}" text-anchor="end" font-size="11" font-weight="700" fill="#34495e">${fmt(raw, 1)} ${unit}</text>`;
+  }
   return `
     <g class="mini-demand-diagram">
       <rect x="${left}" y="${yTop}" width="${plotW}" height="${plotH}" rx="8" fill="${bg}" stroke="#dbe3ec"/>
       <text x="${left}" y="${yTop - 10}" font-size="12" font-weight="850" fill="#34495e">${label}</text>
-      <text x="${left + 112}" y="${yTop - 10}" font-size="11" fill="#667587">max ${fmt(maxVal, 1)} ${unit}</text>
+      ${dynamicText}
       ${!absMode ? `<line x1="${left}" y1="${p.zeroY}" x2="${left + plotW}" y2="${p.zeroY}" stroke="#c7d1dc" stroke-dasharray="5 5"/>` : `<line x1="${left}" y1="${p.zeroY}" x2="${left + plotW}" y2="${p.zeroY}" stroke="#c7d1dc"/>`}
       <path d="${fillPath}" fill="${fill}" opacity="0.16"/>
       <path d="${p.path}" fill="none" stroke="${stroke}" stroke-width="2.7"/>
+      ${marker}
       <text x="${left + 8}" y="${yTop + 17}" font-size="10.5" fill="#667587">${fmt(p.ymax, 1)}</text>
       <text x="${left + 8}" y="${yTop + plotH - 7}" font-size="10.5" fill="#667587">${fmt(p.ymin, 1)}</text>
     </g>`;
 }
-
-function buildMiniInterfaceDiagram(r, yTop, left, plotW, plotH) {
+function buildMiniInterfaceDiagram(r, yTop, left, plotW, plotH, station = null) {
   const qMax = Math.max(...r.stations.map(s => Math.abs(s.qDesign)));
   const vMax = Math.max(...r.stations.map(s => Math.abs(s.vInterface)));
   const local = r.stations.map(s => ({ x: s.x, qNorm: qMax > 0 ? Math.abs(s.qDesign) / qMax : 0 }));
   const p = miniPathData(local, "qNorm", left, yTop, plotW, plotH, true, false);
   const fillPath = fillToZeroPaths(p.points, p.zeroY, true);
+  let marker = "";
+  let dynamicText = "";
+  if (station) {
+    const qNorm = qMax > 0 ? Math.abs(station.qDesign) / qMax : 0;
+    const sx0 = p.sx(station.x);
+    const sy0 = p.sy(qNorm);
+    marker = `<circle cx="${sx0}" cy="${sy0}" r="4.2" fill="#b26a00" stroke="#fff" stroke-width="1.5"/>`;
+    dynamicText = `<text x="${left + plotW - 8}" y="${yTop - 10}" text-anchor="end" font-size="11" font-weight="700" fill="#34495e">q=${fmt(station.qDesign, 1)} kN/m · v=${fmt(station.vInterface, 3)} MPa</text>`;
+  }
   return `
     <g class="mini-demand-diagram">
       <rect x="${left}" y="${yTop}" width="${plotW}" height="${plotH}" rx="8" fill="#fffaf2" stroke="#ead7b5"/>
       <text x="${left}" y="${yTop - 10}" font-size="12" font-weight="850" fill="#34495e">Interface q / v demand</text>
-      <text x="${left + 150}" y="${yTop - 10}" font-size="11" fill="#667587">max ${fmt(qMax, 1)} kN/m = ${fmt(vMax, 3)} MPa</text>
+      ${dynamicText}
       <line x1="${left}" y1="${p.zeroY}" x2="${left + plotW}" y2="${p.zeroY}" stroke="#d9c4a0"/>
       <path d="${fillPath}" fill="#b26a00" opacity="0.18"/>
       <path d="${p.path}" fill="none" stroke="#b26a00" stroke-width="2.7"/>
+      ${marker}
       <text x="${left + 8}" y="${yTop + 17}" font-size="10.5" fill="#806000">q: kN/m</text>
       <text x="${left + plotW - 8}" y="${yTop + 17}" text-anchor="end" font-size="10.5" fill="#806000">v: MPa</text>
       <text x="${left + 8}" y="${yTop + plotH - 7}" font-size="10.5" fill="#806000">0</text>
+      <text x="${left + plotW - 8}" y="${yTop + plotH - 7}" text-anchor="end" font-size="10.5" fill="#806000">max ${fmt(qMax, 1)} / ${fmt(vMax, 3)}</text>
     </g>`;
 }
-
 function buildShearZones(r, left, plotW, L, y) {
   const high = r.summary.highShearThreshold;
   const stations = r.stations;
@@ -733,7 +723,7 @@ function renderElevation(r) {
   const topY = 68;
   const jointY = topY + slabH;
   const bottomY = topY + totalBeamH;
-  const zoneY = bottomY + 34;
+  const zoneY = bottomY + 42;
 
   let arrows = "";
   const wLabel = r.inputs.Wf !== 0 ? `<text x="${left + 3}" y="${topY - 22}" font-size="10.5" fill="#1f6feb">Wf=${fmt(r.inputs.Wf,1)} kN/m</text>` : "";
@@ -766,20 +756,20 @@ function renderElevation(r) {
        <text x="${scaleX(r.inputs.L1 + r.inputs.L2/2, L, left, plotW)}" y="${bottomY + 67}" text-anchor="middle" font-size="12">L2=${fmt(r.inputs.L2,2)} m</text>`
     : `<text x="${left + plotW/2}" y="${bottomY + 67}" text-anchor="middle" font-size="12">L=${fmt(r.inputs.L1,2)} m</text>`;
 
-  const diagramTop = Math.max(240, zoneY + 44);
-  const miniM = buildMiniDiagram(r, "M", "Mf diagram", "kN·m", diagramTop, left, plotW, 100, false, { positiveDown: true, bg: "#f7fbff" });
-  const miniV = buildMiniDiagram(r, "V", "Vf diagram", "kN", diagramTop + 126, left, plotW, 100, false, { bg: "#f7fafc" });
-  const miniInterface = buildMiniInterfaceDiagram(r, diagramTop + 252, left, plotW, 110);
+  const diagramTop = Math.max(255, zoneY + 52);
+  const miniM = buildMiniDiagram(r, "M", "Mf diagram", "kN·m", diagramTop, left, plotW, 105, false, { positiveDown: true, bg: "#f7fbff", station: st });
+  const miniV = buildMiniDiagram(r, "V", "Vf diagram", "kN", diagramTop + 132, left, plotW, 105, false, { bg: "#f7fafc", station: st });
+  const miniInterface = buildMiniInterfaceDiagram(r, diagramTop + 264, left, plotW, 112, st);
   const cursorX = st ? scaleX(st.x, L, left, plotW) : left;
-  const cursorBottom = diagramTop + 252 + 110;
-  const zoneText = local ? `zone ${local.zone}` : "";
+  const cursorBottom = diagramTop + 264 + 112;
+  const zoneText = local ? `Shear zone ${local.zone}` : "";
   const cursorSvg = st ? `
-    <line x1="${cursorX}" y1="${topY - 10}" x2="${cursorX}" y2="${cursorBottom}" stroke="#b3261e" stroke-width="1.6" stroke-dasharray="5 5"/>
+    <line x1="${cursorX}" y1="${topY - 10}" x2="${cursorX}" y2="${cursorBottom}" stroke="#b3261e" stroke-width="1.5" stroke-dasharray="5 5"/>
     <circle cx="${cursorX}" cy="${jointY}" r="4" fill="#b3261e"/>
-    <rect x="${Math.min(width - 178, Math.max(8, cursorX + 8))}" y="${diagramTop - 35}" width="170" height="28" rx="8" fill="#fff" stroke="#d0d7de"/>
-    <text x="${Math.min(width - 168, Math.max(18, cursorX + 18))}" y="${diagramTop - 17}" font-size="11" fill="#34495e">x=${fmt(st.x, 3)} m · ${zoneText}</text>` : "";
+    <text x="${Math.min(width - 8, Math.max(8, cursorX))}" y="${zoneY - 14}" text-anchor="middle" font-size="10.5" fill="#b3261e" font-weight="700">x=${fmt(st.x,3)} m</text>
+  ` : "";
 
-  $("beamElevation").innerHTML = `<svg viewBox="0 0 ${width} ${height}" role="img" aria-label="Beam elevation with aligned demand diagrams">
+  const svg = `<svg viewBox="0 0 ${width} ${height}" role="img" aria-label="Beam elevation with aligned demand diagrams">
     <defs>
       <marker id="arrowBlue" markerWidth="8" markerHeight="8" refX="4" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 Z" fill="#1f6feb"/></marker>
       <marker id="arrowRed" markerWidth="8" markerHeight="8" refX="4" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 Z" fill="#b3261e"/></marker>
@@ -790,10 +780,10 @@ function renderElevation(r) {
     ${pointSvg}
     <rect x="${left}" y="${topY}" width="${plotW}" height="${slabH}" rx="4" fill="#dce9f8" stroke="#5f6f82"/>
     <rect x="${left}" y="${jointY}" width="${plotW}" height="${webH}" rx="4" fill="#e8edf3" stroke="#5f6f82"/>
-    <line x1="${left}" y1="${jointY}" x2="${left + plotW}" y2="${jointY}" stroke="#b26a00" stroke-width="3" stroke-dasharray="8 6"/>
-    <text x="${left + 8}" y="${jointY - 7}" font-size="11" font-weight="800" fill="#6b4600">cold joint / roughened interface</text>
+    <line x1="${left}" y1="${jointY}" x2="${left + plotW}" y2="${jointY}" stroke="#b26a00" stroke-width="2.2" stroke-dasharray="7 6"/>
+    <text x="${left + 8}" y="${jointY - 6}" font-size="11" fill="#6b4600" font-weight="700">cold joint / roughened interface</text>
     ${supportSvg}
-    <line x1="${left - 30}" y1="${topY}" x2="${left - 30}" y2="${bottomY}" stroke="#8091a5"/>
+    <line x1="${left - 24}" y1="${topY}" x2="${left - 24}" y2="${bottomY}" stroke="#8091a5"/>
     <line x1="${left - 38}" y1="${topY}" x2="${left - 22}" y2="${topY}" stroke="#8091a5"/>
     <line x1="${left - 38}" y1="${bottomY}" x2="${left - 22}" y2="${bottomY}" stroke="#8091a5"/>
     <text x="${left - 45}" y="${topY + totalBeamH/2}" transform="rotate(-90 ${left - 45} ${topY + totalBeamH/2})" font-size="12" text-anchor="middle">h=${fmt(r.inputs.h,0)} mm</text>
@@ -802,13 +792,32 @@ function renderElevation(r) {
     <line x1="${left + plotW}" y1="${bottomY + 45}" x2="${left + plotW}" y2="${bottomY + 59}" stroke="#8091a5"/>
     ${spanLabels}
     ${buildShearZones(r, left, plotW, L, zoneY)}
+    <text x="${left + plotW - 2}" y="${zoneY - 12}" text-anchor="end" font-size="11" fill="#667587">${zoneText}</text>
     ${miniM}
     ${miniV}
     ${miniInterface}
     ${cursorSvg}
   </svg>`;
-}
 
+  $("beamElevation").innerHTML = `
+    <div class="beam-elev-wrap">
+      ${svg}
+      <div class="beam-slider-overlay" style="left:${left}px; width:${plotW}px; top:${zoneY - 12}px;">
+        <input id="stationSlider" type="range" min="0" max="${r.stations.length - 1}" step="1" value="${selectedStationIndex}" aria-label="Station along beam" />
+      </div>
+    </div>`;
+
+  const slider = $("stationSlider");
+  if (slider) {
+    slider.addEventListener("input", () => {
+      selectedStationIndex = parseInt(slider.value, 10) || 0;
+      if (lastResult) {
+        renderElevation(lastResult);
+        renderCrossSection(lastResult);
+      }
+    });
+  }
+}
 function labelBeamSystem(system) {
   if (system === "simple") return "single-span simply supported";
   if (system === "twoSpan") return "two-span continuous";
@@ -839,18 +848,22 @@ function renderCrossSection(r) {
   const innerY1 = y0 + secH - coverPx;
 
   const count = Math.max(1, Math.round(r.inputs.mainCount));
-  const usableW = Math.max(10, innerX1 - innerX0 - 2 * mainR);
-  const maxCols = Math.max(1, Math.floor(usableW / Math.max(2.2 * mainR, 5)) + 1);
-  const cols = Math.min(count, Math.max(2, Math.min(maxCols, Math.ceil(Math.sqrt(count * r.inputs.b / Math.max(1, r.inputs.h))))));
-  const rows = Math.ceil(count / cols);
-  let bars = "";
-  for (let i = 0; i < count; i++) {
-    const row = Math.floor(i / cols);
-    const col = i % cols;
-    const bx = innerX0 + mainR + col * (usableW / Math.max(1, cols - 1));
-    const by = innerY1 - mainR - row * Math.max(2.6 * mainR, 7);
-    if (by > innerY0 + mainR) bars += `<circle cx="${bx}" cy="${by}" r="${mainR}" fill="#1f2937"/>`;
+  const rows = count === 1 ? 1 : 2;
+  const bottomCount = rows === 1 ? count : Math.ceil(count / 2);
+  const topCount = rows === 1 ? 0 : count - bottomCount;
+  const rowGap = Math.max(2.9 * mainR, 12);
+  const bottomYBars = innerY1 - mainR;
+  const topYBars = bottomYBars - rowGap;
+
+  function rowBars(n, y) {
+    if (n <= 0) return "";
+    const usable = Math.max(0, innerX1 - innerX0 - 2 * mainR);
+    return Array.from({ length: n }, (_, i) => {
+      const bx = n === 1 ? (innerX0 + innerX1) / 2 : innerX0 + mainR + i * (usable / Math.max(1, n - 1));
+      return `<circle cx="${bx}" cy="${y}" r="${mainR}" fill="#1f2937"/>`;
+    }).join("");
   }
+  const bars = rowBars(topCount, topYBars) + rowBars(bottomCount, bottomYBars);
 
   const stirrupLegs = Math.max(0, Math.round(r.inputs.stirrupLegs));
   let legs = "";
@@ -893,11 +906,10 @@ function renderCrossSection(r) {
     <text x="${x0}" y="${noteY}" font-size="12" fill="#2d3b4d"><tspan font-weight="800">Second slab:</tspan> t=${fmt(r.inputs.slabDepth,0)} mm · <tspan fill="#6b4600" font-weight="800">roughened interface</tspan></text>
     <text x="${x0}" y="${noteY + 21}" font-size="12" fill="#2a5caa">Primary: ${fmt(r.inputs.stirrupLegs,0)} legs ${r.inputs.stirrupBar} @ ${fmt(r.inputs.stirrupSpacing,0)} mm</text>
     <text x="${x0}" y="${noteY + 42}" font-size="12" fill="#b3261e">Add: ${fmt(r.inputs.dowelLegs,0)} legs ${r.inputs.dowelBar} @ ${fmt(r.inputs.dowelSpacing,0)} mm</text>
-    <text x="${x0}" y="${noteY + 63}" font-size="12" fill="#1f2937">Bottom: ${fmt(r.inputs.mainCount,0)}-${r.inputs.mainBar}; bar diameters shown to drawing scale</text>
+    <text x="${x0}" y="${noteY + 63}" font-size="12" fill="#1f2937">Bottom: ${fmt(r.inputs.mainCount,0)}-${r.inputs.mainBar}; shown in ${rows} row${rows>1?'s':''}</text>
     <text x="${x0}" y="${noteY + 84}" font-size="11" fill="#667587">${localLine}</text>
   </svg>`;
 }
-
 function renderCharts(r) {
   // Diagrams are now rendered once in the beam elevation panel so that demand
   // curves stay vertically aligned with the member geometry.
@@ -1044,16 +1056,6 @@ function attachEvents() {
       if (el.type === "number") runCalculations();
     });
   });
-  if ($("stationSlider")) {
-    $("stationSlider").addEventListener("input", () => {
-      selectedStationIndex = parseInt($("stationSlider").value, 10) || 0;
-      if (lastResult) {
-        renderElevation(lastResult);
-        renderCrossSection(lastResult);
-        renderStationReadout(lastResult);
-      }
-    });
-  }
   $("runButton").addEventListener("click", runCalculations);
   $("resetDefaults").addEventListener("click", () => { applyDefaults(); runCalculations(); });
   $("downloadCsv").addEventListener("click", downloadCsv);

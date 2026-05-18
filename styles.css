@@ -552,43 +552,59 @@ code {
 }
 
 
-/* v7 station scrubber and layout refinements */
-.station-scrubber {
-  display: grid;
-  grid-template-columns: minmax(320px, 1fr) minmax(300px, 430px);
-  gap: 12px;
-  align-items: stretch;
-  margin: -4px 0 12px;
+/* v8 station slider over beam zone line */
+.beam-elev-wrap {
+  position: relative;
+  width: 100%;
 }
 
-.station-scrubber label {
-  display: grid;
-  grid-template-columns: 130px 1fr;
+.beam-slider-overlay {
+  position: absolute;
+  height: 24px;
+  display: flex;
   align-items: center;
-  gap: 10px;
-  border: 1px solid var(--line);
-  border-radius: 14px;
-  padding: 10px 12px;
-  background: #fbfdff;
+  z-index: 3;
 }
 
-.station-scrubber input[type=range] {
+.beam-slider-overlay input[type=range] {
+  width: 100%;
   padding: 0;
+  margin: 0;
+  background: transparent;
 }
 
-.station-readout {
-  border: 1px solid var(--line);
-  border-radius: 14px;
-  padding: 10px 12px;
-  background: #fbfdff;
-  color: #26394d;
-  font-size: 0.82rem;
-  line-height: 1.35;
+.beam-slider-overlay input[type=range]::-webkit-slider-runnable-track {
+  height: 6px;
+  background: rgba(31, 111, 235, 0.18);
+  border-radius: 999px;
 }
 
-.station-readout strong { color: var(--ink); }
-.station-readout .zone-a { color: var(--bad); font-weight: 850; }
-.station-readout .zone-b { color: var(--warn); font-weight: 850; }
+.beam-slider-overlay input[type=range]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  margin-top: -5px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--accent);
+  border: 2px solid #fff;
+  box-shadow: 0 1px 6px rgba(18,32,47,0.22);
+}
+
+.beam-slider-overlay input[type=range]::-moz-range-track {
+  height: 6px;
+  background: rgba(31, 111, 235, 0.18);
+  border-radius: 999px;
+}
+
+.beam-slider-overlay input[type=range]::-moz-range-thumb {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--accent);
+  border: 2px solid #fff;
+  box-shadow: 0 1px 6px rgba(18,32,47,0.22);
+}
 
 #beamElevation svg {
   max-height: 660px;
@@ -610,6 +626,5 @@ code {
 }
 
 @media (max-width: 900px) {
-  .station-scrubber { grid-template-columns: 1fr; }
-  .station-scrubber label { grid-template-columns: 1fr; }
+  .beam-slider-overlay { position: static; width: 100% !important; margin: 8px 0 2px; }
 }

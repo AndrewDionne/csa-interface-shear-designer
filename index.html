@@ -166,7 +166,38 @@
         </div>
       </details>
 
-      <button class="primary-button" id="runButton">Run analysis + design check</button>
+      <div class="button-row">
+        <button class="primary-button" id="runButton">Run analysis + design check</button>
+        <button class="secondary-button" id="autoDesignButton" type="button">Auto design</button>
+      </div>
+
+      <div class="auto-design-panel" id="autoDesignPanel" hidden>
+        <div class="auto-design-head">
+          <h3>Auto design options</h3>
+          <button class="mini-button" id="closeAutoDesign" type="button">×</button>
+        </div>
+        <label>Shear-zone concept
+          <select id="autoZoneCount">
+            <option value="1">1 zone: uniform detail</option>
+            <option value="3" selected>3 zones: A / B / A support-zone concept</option>
+          </select>
+        </label>
+        <label>Design strategy
+          <select id="autoStrategy">
+            <option value="primaryOnly" selected>Use primary stirrups only</option>
+            <option value="addDowels">Keep primary spacing + add dowels</option>
+            <option value="hybrid">Tighten primary to spacing limit + add dowels if needed</option>
+          </select>
+        </label>
+        <label>Maximum practical spacing, mm
+          <input id="autoMaxSpacing" type="number" step="25" value="450" />
+        </label>
+        <div class="auto-design-actions">
+          <button class="primary-button" id="applyAutoDesign" type="button">Apply auto design</button>
+          <button class="ghost-button" id="previewAutoDesign" type="button">Preview only</button>
+        </div>
+        <div class="auto-design-result" id="autoDesignResult">Choose a strategy, then preview or apply.</div>
+      </div>
     </section>
 
     <section class="main-results">

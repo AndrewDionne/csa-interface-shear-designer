@@ -275,6 +275,8 @@ function collectInputs() {
     cover: num("cover"),
     mainBar: val("mainBar"),
     mainCount: num("mainCount"),
+    shearMethod: val("shearMethod"),
+    interfaceCondition: val("interfaceCondition"),
     interfaceDemandModel: val("interfaceDemandModel"),
     cohesion: num("cohesion"),
     mu: num("mu"),
@@ -420,10 +422,19 @@ function runCalculations() {
   const minSteelOk = stirrupAvSet >= AvMin;
   const interfaceOk = totalInterfaceAvailable >= interfaceAvReqPerM && maxStress <= concreteLimit;
   const flex = computeFlexuralEstimate(inputs, section, maxMabs);
+  const rhoAvailableInterface = totalInterfaceAvailable / Math.max(1, section.b * 1000);
+  const interfaceStressResistanceRaw = inputs.lambda * inputs.phiC * (inputs.cohesion + inputs.mu * rhoAvailableInterface * inputs.fy);
+  const interfaceStressResistance = Math.min(concreteLimit, interfaceStressResistanceRaw);
+  const beamShearRatio = maxV / Math.max(1e-9, Vr);
+  const interfaceShearRatio = maxStress / Math.max(1e-9, interfaceStressResistance);
+  const flexRatio = maxMabs / Math.max(1e-9, flex.Mr);
+  const combinedShearRatio = beamShearRatio + interfaceShearRatio;
+  const combinedUtilization = flexRatio + combinedShearRatio;
+  const combinedOk = combinedUtilization <= 1.0;
 
   const result = {
     inputs, section, fe, stations,
-    summary: { maxV, maxMpos, maxMneg, maxMabs, maxQ, maxStress, Vc, Vs, Vr, VrMax, beta, thetaDeg, cotTheta, beamAvReqPerM: beamAvReqPerM2, highShearThreshold, sMax, AvMin, stirrupAvSet, stirrupAvPerM, dowelAvSet, dowelAvPerM, rhoReq, interfaceAvReqPerM, concreteLimit, unusedStirrupAv, additionalInterfaceReq, totalInterfaceAvailable, verticalStrengthOk, verticalSpacingOk, minSteelOk, interfaceOk, flex }
+    summary: { maxV, maxMpos, maxMneg, maxMabs, maxQ, maxStress, Vc, Vs, Vr, VrMax, beta, thetaDeg, cotTheta, beamAvReqPerM: beamAvReqPerM2, highShearThreshold, sMax, AvMin, stirrupAvSet, stirrupAvPerM, dowelAvSet, dowelAvPerM, rhoReq, interfaceAvReqPerM, concreteLimit, unusedStirrupAv, additionalInterfaceReq, totalInterfaceAvailable, interfaceStressResistanceRaw, interfaceStressResistance, beamShearRatio, interfaceShearRatio, flexRatio, combinedShearRatio, combinedUtilization, combinedOk, verticalStrengthOk, verticalSpacingOk, minSteelOk, interfaceOk, flex }
   };
 
   lastResult = result;
@@ -448,7 +459,7 @@ function render(result) {
   renderCharts(result);
   renderTable(result);
 
-  const ok = result.summary.verticalStrengthOk && result.summary.verticalSpacingOk && result.summary.minSteelOk && result.summary.interfaceOk && result.summary.flex.ok;
+  const ok = result.summary.verticalStrengthOk && result.summary.verticalSpacingOk && result.summary.minSteelOk && result.summary.interfaceOk && result.summary.flex.ok && result.summary.combinedOk;
   const hasWarning = !result.summary.flex.ok;
   const status = $("overallStatus");
   status.className = "status-chip " + (ok ? "ok" : hasWarning ? "warn" : "ng");
@@ -459,18 +470,29 @@ function card(label, value, note = "") {
   return `<div class="card"><div class="label">${label}</div><div class="value">${value}</div>${note ? `<div class="note">${note}</div>` : ""}</div>`;
 }
 
+function interfaceConditionLabel(value) {
+  if (value === "roughened") return "clean + intentionally roughened";
+  if (value === "clean") return "clean, not intentionally roughened";
+  return "custom interface coefficients";
+}
+
+function demandModelLabel(value) {
+  if (value === "elastic") return "elastic VQ/I";
+  if (value === "cracked") return "cracked V/z";
+  return "max(elastic, cracked)";
+}
+
 function renderSummary(r) {
   const s = r.summary;
-  const reactions = r.fe.reactions.map((rx, i) => `R${i + 1}=${fmt(rx.vertical, 1)} kN`).join("<br>");
+  const reactions = r.fe.reactions.map((rx, i) => `R${i + 1}=${fmt(rx.vertical, 0)}`).join(", ");
   $("summaryCards").innerHTML = [
-    card("Max |Vf|", `${fmt(s.maxV, 1)} kN`, reactions),
-    card("Max +Mf", `${fmt(s.maxMpos, 1)} kN·m`, `Max hogging: ${fmt(s.maxMneg, 1)} kN·m`),
-    card("Max q = VQ/I", `${fmt(s.maxQ, 1)} kN/m`, `Interface model: ${r.inputs.interfaceDemandModel}`),
-    card("Max interface stress", `${fmt(s.maxStress, 3)} MPa`, `Limit check uses c=${fmt(r.inputs.cohesion, 2)} MPa, μ=${fmt(r.inputs.mu, 2)}`),
-    card("Effective shear depth dv", `${fmt(r.section.dv, 0)} mm`, `d=${fmt(r.section.d, 0)} mm, z=${fmt(r.section.z, 0)} mm`),
-    card("Beam shear steel req.", `${fmt(s.beamAvReqPerM, 0)} mm²/m`, `Concrete Vc=${fmt(s.Vc, 0)} kN`),
-    card("Interface steel req.", `${fmt(s.interfaceAvReqPerM, 0)} mm²/m`, `Before allocation to existing stirrups`),
-    card("Additional interface steel req.", `${fmt(s.additionalInterfaceReq, 0)} mm²/m`, `After selected allocation method`)
+    card("Max |Vf|", `${fmt(s.maxV, 0)} kN`, reactions),
+    card("Max Mf", `${fmt(s.maxMabs, 0)} kN·m`, `+${fmt(s.maxMpos, 0)}, hog ${fmt(s.maxMneg, 0)}`),
+    card("Max q + v", `${fmt(s.maxQ, 0)} kN/m · ${fmt(s.maxStress, 3)} MPa`, `${demandModelLabel(r.inputs.interfaceDemandModel)}`),
+    card("dv / d", `${fmt(r.section.dv, 0)} / ${fmt(r.section.d, 0)} mm`, `z=${fmt(r.section.z, 0)} mm`),
+    card("Beam shear steel", `${fmt(s.beamAvReqPerM, 0)} mm²/m`, `Vc=${fmt(s.Vc, 0)} kN`),
+    card("Interface steel", `${fmt(s.interfaceAvReqPerM, 0)} req · ${fmt(s.additionalInterfaceReq, 0)} add`, `${interfaceConditionLabel(r.inputs.interfaceCondition)}`),
+    card("ULS utilization", `${fmt(s.combinedUtilization, 2)}`, `M/Mr=${fmt(s.flexRatio, 2)}; V/Vr=${fmt(s.beamShearRatio, 2)}+${fmt(s.interfaceShearRatio, 2)} ≤ 1.0`)
   ].join("");
 }
 
@@ -493,7 +515,8 @@ function renderChecks(r) {
     checkCard("Minimum shear steel", s.minSteelOk, `Av=${fmt(s.stirrupAvSet, 0)} mm² ≥ Av,min=${fmt(s.AvMin, 0)} mm²`, `Minimum steel checked for selected primary stirrup spacing.`),
     checkCard("Interface shear", s.interfaceOk, `Available=${fmt(s.totalInterfaceAvailable, 0)} mm²/m ≥ Req=${fmt(s.interfaceAvReqPerM, 0)} mm²/m`, `Unused stirrup balance=${fmt(s.unusedStirrupAv, 0)} mm²/m; added dowels=${fmt(s.dowelAvPerM, 0)} mm²/m.`),
     checkCard("Interface concrete limit", s.maxStress <= s.concreteLimit, `v=${fmt(s.maxStress, 3)} MPa ≤ ${fmt(s.concreteLimit, 2)} MPa`, `CSA-style upper-bound check 0.25ϕc f'c.`),
-    checkCard("Flexural estimate", s.flex.ok, `Mr≈${fmt(s.flex.Mr, 0)} kN·m vs Mf=${fmt(s.maxMabs, 0)} kN·m`, `Approximate singly-reinforced rectangular stress-block estimate. c≈${fmt(s.flex.c, 0)} mm.`, true)
+    checkCard("Flexural estimate", s.flex.ok, `Mr≈${fmt(s.flex.Mr, 0)} kN·m vs Mf=${fmt(s.maxMabs, 0)} kN·m`, `Approximate singly-reinforced rectangular stress-block estimate. c≈${fmt(s.flex.c, 0)} mm.`, true),
+    checkCard("Combined utilization", s.combinedOk, `M/Mr + V/Vr = ${fmt(s.combinedUtilization, 2)} ≤ 1.00`, `V/Vr is beam shear ${fmt(s.beamShearRatio, 2)} plus interface shear ${fmt(s.interfaceShearRatio, 2)}.`, true)
   ].join("");
 }
 
@@ -501,76 +524,137 @@ function scaleX(x, L, left, width) {
   return left + (x / L) * width;
 }
 
+function miniPathData(stations, key, left, yTop, plotW, plotH, absMode) {
+  const xs = stations.map(s => s.x);
+  const ys = stations.map(s => absMode ? Math.abs(s[key]) : s[key]);
+  const xmin = Math.min(...xs), xmax = Math.max(...xs);
+  let ymin = Math.min(...ys), ymax = Math.max(...ys);
+  if (Math.abs(ymax - ymin) < 1e-9) { ymax += 1; ymin -= absMode ? 0 : 1; }
+  if (!absMode) {
+    const m = Math.max(Math.abs(ymin), Math.abs(ymax));
+    ymin = -m; ymax = m;
+  } else {
+    ymin = 0;
+  }
+  const sx = x => left + ((x - xmin) / Math.max(1e-9, xmax - xmin)) * plotW;
+  const sy = y => yTop + (1 - ((y - ymin) / Math.max(1e-9, ymax - ymin))) * plotH;
+  const path = stations.map((d, i) => `${i === 0 ? "M" : "L"} ${sx(d.x).toFixed(2)} ${sy(absMode ? Math.abs(d[key]) : d[key]).toFixed(2)}`).join(" ");
+  return { path, zeroY: sy(0), ymax, ymin };
+}
+
+function buildMiniDiagram(r, key, label, unit, yTop, left, plotW, plotH, absMode) {
+  const p = miniPathData(r.stations, key, left, yTop, plotW, plotH, absMode);
+  const maxVal = Math.max(...r.stations.map(s => Math.abs(s[key])));
+  return `
+    <text x="${left}" y="${yTop - 9}" font-size="12" font-weight="800" fill="#34495e">${label}</text>
+    <text x="${left + 92}" y="${yTop - 9}" font-size="11" fill="#667587">max ${fmt(maxVal, 1)} ${unit}</text>
+    <line x1="${left}" y1="${yTop}" x2="${left}" y2="${yTop + plotH}" stroke="#c7d1dc"/>
+    <line x1="${left}" y1="${yTop + plotH}" x2="${left + plotW}" y2="${yTop + plotH}" stroke="#c7d1dc"/>
+    ${!absMode ? `<line x1="${left}" y1="${p.zeroY}" x2="${left + plotW}" y2="${p.zeroY}" stroke="#dbe3ec" stroke-dasharray="4 4"/>` : ""}
+    <path d="${p.path}" fill="none" stroke="#1f6feb" stroke-width="2.2"/>`;
+}
+
+function buildShearZones(r, left, plotW, L, y) {
+  const high = r.summary.highShearThreshold;
+  const stations = r.stations;
+  const zones = [];
+  let start = stations[0].x;
+  let current = Math.abs(stations[0].V) > high ? "A" : "B";
+  for (let i = 1; i < stations.length; i++) {
+    const z = Math.abs(stations[i].V) > high ? "A" : "B";
+    if (z !== current) {
+      zones.push({ start, end: stations[i - 1].x, zone: current });
+      start = stations[i - 1].x;
+      current = z;
+    }
+  }
+  zones.push({ start, end: stations[stations.length - 1].x, zone: current });
+  return zones.map(seg => {
+    const x1 = scaleX(seg.start, L, left, plotW);
+    const x2 = scaleX(seg.end, L, left, plotW);
+    const color = seg.zone === "A" ? "#b3261e" : "#b26a00";
+    return `<line x1="${x1}" y1="${y}" x2="${x2}" y2="${y}" stroke="${color}" stroke-width="3"/>
+            <line x1="${x1}" y1="${y - 10}" x2="${x1}" y2="${y + 10}" stroke="${color}" stroke-width="2"/>
+            <text x="${(x1 + x2)/2}" y="${y + 20}" text-anchor="middle" font-size="11" fill="${color}">Shear zone ${seg.zone}</text>`;
+  }).join("");
+}
+
 function renderElevation(r) {
-  const width = 980, height = 330, left = 78, right = 42;
+  const width = 980, height = 465, left = 78, right = 42;
   const L = beamLength(r.inputs);
   const plotW = width - left - right;
   const supports = supportLocations(r.inputs);
   const xP = r.inputs.Px;
   const includeP = r.inputs.includePoint && r.inputs.Pf !== 0;
 
-  // Draw the elevation depth roughly to span scale. Cap the pixel height so very deep or very short beams stay legible.
   const pxPerMmAlongSpan = plotW / Math.max(1, L * 1000);
-  const totalBeamH = clamp(r.inputs.h * pxPerMmAlongSpan, 38, 115);
-  const slabH = clamp(r.inputs.slabDepth * pxPerMmAlongSpan, 9, totalBeamH - 12);
-  const webH = Math.max(20, totalBeamH - slabH);
-  const topY = 112;
+  const totalBeamH = clamp(r.inputs.h * pxPerMmAlongSpan, 42, 96);
+  const slabH = clamp(r.inputs.slabDepth * pxPerMmAlongSpan, 8, totalBeamH - 12);
+  const webH = Math.max(22, totalBeamH - slabH);
+  const topY = 68;
   const jointY = topY + slabH;
   const bottomY = topY + totalBeamH;
-  const supportBaseY = bottomY + 52;
+  const zoneY = bottomY + 34;
 
   let arrows = "";
   const nArrows = 14;
   if (r.inputs.Wf !== 0) {
     for (let i = 0; i <= nArrows; i++) {
       const x = left + plotW * i / nArrows;
-      arrows += `<line x1="${x}" y1="32" x2="${x}" y2="${topY - 6}" stroke="#1f6feb" stroke-width="2" marker-end="url(#arrowBlue)"/>`;
+      arrows += `<line x1="${x}" y1="24" x2="${x}" y2="${topY - 6}" stroke="#1f6feb" stroke-width="2" marker-end="url(#arrowBlue)"/>`;
     }
   }
 
   const supportSvg = supports.map((sx, i) => {
     const x = scaleX(sx, L, left, plotW);
     if (r.inputs.beamSystem === "cantilever" && i === 0) {
-      return `<rect x="${x - 12}" y="${topY - 18}" width="24" height="${totalBeamH + 44}" fill="#d9e2ec" stroke="#334e68"/>
+      return `<rect x="${x - 12}" y="${topY - 18}" width="24" height="${totalBeamH + 42}" fill="#d9e2ec" stroke="#334e68"/>
               ${Array.from({ length: 7 }, (_, j) => `<line x1="${x - 18}" y1="${topY - 12 + j*14}" x2="${x - 36}" y2="${topY - 2 + j*14}" stroke="#8091a5"/>`).join("")}`;
     }
-    return `<polygon points="${x},${bottomY + 4} ${x - 18},${bottomY + 36} ${x + 18},${bottomY + 36}" fill="#d9e2ec" stroke="#334e68"/>
-            <line x1="${x - 28}" y1="${bottomY + 36}" x2="${x + 28}" y2="${bottomY + 36}" stroke="#334e68"/>`;
+    return `<polygon points="${x},${bottomY + 4} ${x - 18},${bottomY + 34} ${x + 18},${bottomY + 34}" fill="#d9e2ec" stroke="#334e68"/>
+            <line x1="${x - 28}" y1="${bottomY + 34}" x2="${x + 28}" y2="${bottomY + 34}" stroke="#334e68"/>`;
   }).join("");
 
   const pointSvg = includeP ? (() => {
     const x = scaleX(xP, L, left, plotW);
-    return `<line x1="${x}" y1="18" x2="${x}" y2="${topY - 9}" stroke="#b3261e" stroke-width="4" marker-end="url(#arrowRed)"/>
-            <text x="${x + 8}" y="28" fill="#b3261e" font-size="13" font-weight="800">Pf=${fmt(r.inputs.Pf, 0)} kN @ x=${fmt(xP, 2)} m</text>`;
+    return `<line x1="${x}" y1="14" x2="${x}" y2="${topY - 9}" stroke="#b3261e" stroke-width="4" marker-end="url(#arrowRed)"/>
+            <text x="${x + 8}" y="24" fill="#b3261e" font-size="12" font-weight="800">Pf=${fmt(r.inputs.Pf, 0)} kN @ x=${fmt(xP, 2)} m</text>`;
   })() : "";
 
   const spanLabels = r.inputs.beamSystem === "twoSpan"
-    ? `<text x="${scaleX(r.inputs.L1/2, L, left, plotW)}" y="${height-24}" text-anchor="middle" font-size="13">L1=${fmt(r.inputs.L1,2)} m</text>
-       <text x="${scaleX(r.inputs.L1 + r.inputs.L2/2, L, left, plotW)}" y="${height-24}" text-anchor="middle" font-size="13">L2=${fmt(r.inputs.L2,2)} m</text>`
-    : `<text x="${left + plotW/2}" y="${height-24}" text-anchor="middle" font-size="13">L=${fmt(r.inputs.L1,2)} m</text>`;
+    ? `<text x="${scaleX(r.inputs.L1/2, L, left, plotW)}" y="${bottomY + 67}" text-anchor="middle" font-size="12">L1=${fmt(r.inputs.L1,2)} m</text>
+       <text x="${scaleX(r.inputs.L1 + r.inputs.L2/2, L, left, plotW)}" y="${bottomY + 67}" text-anchor="middle" font-size="12">L2=${fmt(r.inputs.L2,2)} m</text>`
+    : `<text x="${left + plotW/2}" y="${bottomY + 67}" text-anchor="middle" font-size="12">L=${fmt(r.inputs.L1,2)} m</text>`;
 
-  $("beamElevation").innerHTML = `<svg viewBox="0 0 ${width} ${height}" role="img" aria-label="Beam elevation">
+  const miniM = buildMiniDiagram(r, "M", "Mf diagram", "kN·m", 238, left, plotW, 70, false);
+  const miniV = buildMiniDiagram(r, "V", "Vf diagram", "kN", 348, left, plotW, 70, false);
+
+  $("beamElevation").innerHTML = `<svg viewBox="0 0 ${width} ${height}" role="img" aria-label="Beam elevation with aligned demand diagrams">
     <defs>
       <marker id="arrowBlue" markerWidth="8" markerHeight="8" refX="4" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 Z" fill="#1f6feb"/></marker>
       <marker id="arrowRed" markerWidth="8" markerHeight="8" refX="4" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 Z" fill="#b3261e"/></marker>
     </defs>
-    <text x="${left}" y="20" font-size="14" font-weight="800">Elevation: ${labelBeamSystem(r.inputs.beamSystem)}</text>
-    <text x="${left}" y="39" font-size="12" fill="#667587">Wf=${fmt(r.inputs.Wf,1)} kN/m</text>
+    <text x="${left}" y="18" font-size="14" font-weight="800">Elevation: ${labelBeamSystem(r.inputs.beamSystem)}</text>
+    <text x="${left + 245}" y="18" font-size="11" fill="#667587">Method: simplified CSA-style beam shear + ${demandModelLabel(r.inputs.interfaceDemandModel)} interface demand</text>
+    <text x="${left}" y="36" font-size="11" fill="#667587">Wf=${fmt(r.inputs.Wf,1)} kN/m</text>
     ${arrows}
     ${pointSvg}
-    <rect x="${left}" y="${topY}" width="${plotW}" height="${slabH}" rx="5" fill="#dce9f8" stroke="#5f6f82"/>
-    <rect x="${left}" y="${jointY}" width="${plotW}" height="${webH}" rx="5" fill="#e8edf3" stroke="#5f6f82"/>
+    <rect x="${left}" y="${topY}" width="${plotW}" height="${slabH}" rx="4" fill="#dce9f8" stroke="#5f6f82"/>
+    <rect x="${left}" y="${jointY}" width="${plotW}" height="${webH}" rx="4" fill="#e8edf3" stroke="#5f6f82"/>
     <line x1="${left}" y1="${jointY}" x2="${left + plotW}" y2="${jointY}" stroke="#b26a00" stroke-width="3" stroke-dasharray="8 6"/>
-    <text x="${left + 8}" y="${jointY - 7}" font-size="12" font-weight="800" fill="#6b4600">cold joint / roughened interface</text>
+    <text x="${left + 8}" y="${jointY - 7}" font-size="11" font-weight="800" fill="#6b4600">cold joint / roughened interface</text>
     ${supportSvg}
     <line x1="${left - 30}" y1="${topY}" x2="${left - 30}" y2="${bottomY}" stroke="#8091a5"/>
     <line x1="${left - 38}" y1="${topY}" x2="${left - 22}" y2="${topY}" stroke="#8091a5"/>
     <line x1="${left - 38}" y1="${bottomY}" x2="${left - 22}" y2="${bottomY}" stroke="#8091a5"/>
-    <text x="${left - 45}" y="${topY + totalBeamH/2}" transform="rotate(-90 ${left - 45} ${topY + totalBeamH/2})" font-size="13" text-anchor="middle">h=${fmt(r.inputs.h,0)} mm</text>
-    <line x1="${left}" y1="${height-45}" x2="${left + plotW}" y2="${height-45}" stroke="#8091a5"/>
-    <line x1="${left}" y1="${height-52}" x2="${left}" y2="${height-38}" stroke="#8091a5"/>
-    <line x1="${left + plotW}" y1="${height-52}" x2="${left + plotW}" y2="${height-38}" stroke="#8091a5"/>
+    <text x="${left - 45}" y="${topY + totalBeamH/2}" transform="rotate(-90 ${left - 45} ${topY + totalBeamH/2})" font-size="12" text-anchor="middle">h=${fmt(r.inputs.h,0)} mm</text>
+    <line x1="${left}" y1="${bottomY + 52}" x2="${left + plotW}" y2="${bottomY + 52}" stroke="#8091a5"/>
+    <line x1="${left}" y1="${bottomY + 45}" x2="${left}" y2="${bottomY + 59}" stroke="#8091a5"/>
+    <line x1="${left + plotW}" y1="${bottomY + 45}" x2="${left + plotW}" y2="${bottomY + 59}" stroke="#8091a5"/>
     ${spanLabels}
+    ${buildShearZones(r, left, plotW, L, zoneY)}
+    ${miniM}
+    ${miniV}
   </svg>`;
 }
 
@@ -582,64 +666,78 @@ function labelBeamSystem(system) {
 }
 
 function renderCrossSection(r) {
-  const w = 430, hSvg = 310;
-  const secW = 182;
-  const secH = 230;
-  const x0 = 42, y0 = 52;
-  const slabRatio = r.section.slabDepth / r.section.h;
-  const slabH = secH * slabRatio;
-  const bottomY = y0 + secH - 22;
-  const mainCountVisible = Math.min(14, Math.max(1, Math.round(r.inputs.mainCount)));
-  const cols = Math.min(7, mainCountVisible);
+  const w = 330, hSvg = 360;
+  const x0 = 48, y0 = 62;
+  const maxW = 230, maxH = 185;
+  const scale = Math.min(maxW / Math.max(1, r.inputs.b), maxH / Math.max(1, r.inputs.h));
+  const secW = r.inputs.b * scale;
+  const secH = r.inputs.h * scale;
+  const slabH = r.section.slabDepth * scale;
+  const main = rebar(r.inputs.mainBar);
+  const stirrup = rebar(r.inputs.stirrupBar);
+  const dowel = rebar(r.inputs.dowelBar);
+  const mainR = Math.max(1.35, (main.diameter * scale) / 2);
+  const stirrupW = Math.max(1.05, stirrup.diameter * scale);
+  const dowelW = Math.max(1.05, dowel.diameter * scale);
+  const coverPx = Math.max(5, r.inputs.cover * scale);
+  const innerX0 = x0 + coverPx + stirrupW;
+  const innerX1 = x0 + secW - coverPx - stirrupW;
+  const innerY0 = y0 + coverPx;
+  const innerY1 = y0 + secH - coverPx;
+
+  const count = Math.max(1, Math.round(r.inputs.mainCount));
+  const usableW = Math.max(10, innerX1 - innerX0 - 2 * mainR);
+  const maxCols = Math.max(1, Math.floor(usableW / Math.max(2.2 * mainR, 5)) + 1);
+  const cols = Math.min(count, Math.max(2, Math.min(maxCols, Math.ceil(Math.sqrt(count * r.inputs.b / Math.max(1, r.inputs.h))))));
+  const rows = Math.ceil(count / cols);
   let bars = "";
-  for (let i = 0; i < mainCountVisible; i++) {
+  for (let i = 0; i < count; i++) {
     const row = Math.floor(i / cols);
     const col = i % cols;
-    const bx = x0 + 28 + col * ((secW - 56) / Math.max(1, cols - 1));
-    const by = bottomY - row * 18;
-    bars += `<circle cx="${bx}" cy="${by}" r="5.6" fill="#1f2937"/>`;
+    const bx = innerX0 + mainR + col * (usableW / Math.max(1, cols - 1));
+    const by = innerY1 - mainR - row * Math.max(2.6 * mainR, 7);
+    if (by > innerY0 + mainR) bars += `<circle cx="${bx}" cy="${by}" r="${mainR}" fill="#1f2937"/>`;
   }
 
   const stirrupLegs = Math.max(0, Math.round(r.inputs.stirrupLegs));
   let legs = "";
-  const nLegs = Math.min(12, stirrupLegs);
+  const nLegs = Math.min(24, stirrupLegs);
   for (let i = 0; i < nLegs; i++) {
-    const lx = x0 + 17 + i * ((secW - 34) / Math.max(1, nLegs - 1));
-    legs += `<line x1="${lx}" y1="${y0 + 13}" x2="${lx}" y2="${y0 + secH - 15}" stroke="#2a5caa" stroke-width="2.5" opacity="0.85"/>`;
+    const lx = innerX0 + i * ((innerX1 - innerX0) / Math.max(1, nLegs - 1));
+    legs += `<line x1="${lx}" y1="${innerY0}" x2="${lx}" y2="${innerY1}" stroke="#2a5caa" stroke-width="${stirrupW}" opacity="0.82"/>`;
   }
 
   const dowelLegs = Math.max(0, Math.round(r.inputs.dowelLegs));
   let dowels = "";
-  const nDowels = Math.min(10, dowelLegs);
+  const nDowels = Math.min(16, dowelLegs);
   for (let i = 0; i < nDowels; i++) {
-    const dx = x0 + 25 + i * ((secW - 50) / Math.max(1, nDowels - 1));
-    dowels += `<path d="M${dx},${y0 + slabH - 35} V${y0 + slabH + 47} q0,10 10,10 h12" fill="none" stroke="#b3261e" stroke-width="2.8" stroke-linecap="round"/>`;
+    const dx = innerX0 + (i + 0.5) * ((innerX1 - innerX0) / Math.max(1, nDowels));
+    dowels += `<path d="M${dx},${y0 + slabH - 18} V${y0 + slabH + 44} q0,8 8,8 h10" fill="none" stroke="#b3261e" stroke-width="${dowelW}" stroke-linecap="round"/>`;
   }
 
-  const labelX = x0 + secW + 16;
-
-  $("crossSection").innerHTML = `<svg viewBox="0 0 ${w} ${hSvg}" role="img" aria-label="Cross-section reinforcement">
-    <text x="${x0}" y="21" font-size="14" font-weight="850">Cross-section</text>
-    <text x="${x0}" y="38" font-size="11.5" fill="#2d3b4d">b=${fmt(r.inputs.b,0)} mm, h=${fmt(r.inputs.h,0)} mm</text>
-    <rect x="${x0}" y="${y0}" width="${secW}" height="${secH}" fill="#edf2f7" stroke="#4a5568" stroke-width="1.8"/>
-    <rect x="${x0}" y="${y0}" width="${secW}" height="${slabH}" fill="#dce9f8" stroke="#4a5568" stroke-width="1.2"/>
-    <line x1="${x0}" y1="${y0 + slabH}" x2="${x0 + secW}" y2="${y0 + slabH}" stroke="#b26a00" stroke-width="2.7" stroke-dasharray="7 6"/>
+  const noteY = y0 + secH + 42;
+  $("crossSection").innerHTML = `<svg viewBox="0 0 ${w} ${hSvg}" role="img" aria-label="Cross-section reinforcement drawn to scale">
+    <text x="${x0}" y="22" font-size="14" font-weight="850">Cross-section</text>
+    <text x="${x0}" y="39" font-size="11" fill="#2d3b4d">b=${fmt(r.inputs.b,0)} mm, h=${fmt(r.inputs.h,0)} mm</text>
+    <rect x="${x0}" y="${y0}" width="${secW}" height="${secH}" fill="#edf2f7" stroke="#4a5568" stroke-width="1.6"/>
+    <rect x="${x0}" y="${y0}" width="${secW}" height="${slabH}" fill="#dce9f8" stroke="#4a5568" stroke-width="1.0"/>
+    <line x1="${x0}" y1="${y0 + slabH}" x2="${x0 + secW}" y2="${y0 + slabH}" stroke="#b26a00" stroke-width="2.4" stroke-dasharray="7 6"/>
     ${legs}
-    <rect x="${x0 + 13}" y="${y0 + 12}" width="${secW - 26}" height="${secH - 24}" rx="10" fill="none" stroke="#2a5caa" stroke-width="2.6"/>
+    <rect x="${innerX0}" y="${innerY0}" width="${innerX1 - innerX0}" height="${innerY1 - innerY0}" rx="7" fill="none" stroke="#2a5caa" stroke-width="${Math.max(1.5, stirrupW)}"/>
     ${dowels}
     ${bars}
-    <text x="${labelX}" y="${y0 + 18}" font-size="11" fill="#2d3b4d"><tspan font-weight="800">Second slab</tspan></text>
-    <text x="${labelX}" y="${y0 + 34}" font-size="10.5" fill="#667587">t=${fmt(r.inputs.slabDepth,0)} mm</text>
-    <text x="${labelX}" y="${y0 + slabH + 6}" font-size="10.8" fill="#6b4600" font-weight="800">roughened interface</text>
-    <text x="${labelX}" y="${y0 + slabH + 29}" font-size="10.8" fill="#2a5caa">Primary: ${fmt(r.inputs.stirrupLegs,0)} legs</text>
-    <text x="${labelX}" y="${y0 + slabH + 44}" font-size="10.8" fill="#2a5caa">${r.inputs.stirrupBar} @ ${fmt(r.inputs.stirrupSpacing,0)} mm</text>
-    <text x="${labelX}" y="${y0 + slabH + 67}" font-size="10.8" fill="#b3261e">Add: ${fmt(r.inputs.dowelLegs,0)} legs</text>
-    <text x="${labelX}" y="${y0 + slabH + 82}" font-size="10.8" fill="#b3261e">${r.inputs.dowelBar} @ ${fmt(r.inputs.dowelSpacing,0)} mm</text>
-    <text x="${labelX}" y="${y0 + secH - 8}" font-size="10.8" fill="#1f2937">Bottom: ${fmt(r.inputs.mainCount,0)}-${r.inputs.mainBar}</text>
+    <line x1="${x0}" y1="${y0 - 13}" x2="${x0 + secW}" y2="${y0 - 13}" stroke="#8091a5"/>
+    <line x1="${x0}" y1="${y0 - 18}" x2="${x0}" y2="${y0 - 8}" stroke="#8091a5"/>
+    <line x1="${x0 + secW}" y1="${y0 - 18}" x2="${x0 + secW}" y2="${y0 - 8}" stroke="#8091a5"/>
+    <text x="${x0 + secW/2}" y="${y0 - 19}" text-anchor="middle" font-size="10.5">b</text>
     <line x1="${x0 - 20}" y1="${y0}" x2="${x0 - 20}" y2="${y0 + secH}" stroke="#8091a5"/>
     <line x1="${x0 - 26}" y1="${y0}" x2="${x0 - 14}" y2="${y0}" stroke="#8091a5"/>
     <line x1="${x0 - 26}" y1="${y0 + secH}" x2="${x0 - 14}" y2="${y0 + secH}" stroke="#8091a5"/>
-    <text x="${x0 - 30}" y="${y0 + secH/2}" transform="rotate(-90 ${x0 - 30} ${y0 + secH/2})" font-size="11" text-anchor="middle">h</text>
+    <text x="${x0 - 30}" y="${y0 + secH/2}" transform="rotate(-90 ${x0 - 30} ${y0 + secH/2})" font-size="10.5" text-anchor="middle">h</text>
+    <text x="${x0}" y="${noteY}" font-size="10.5" fill="#2d3b4d"><tspan font-weight="800">Second slab:</tspan> t=${fmt(r.inputs.slabDepth,0)} mm · <tspan fill="#6b4600" font-weight="800">roughened interface</tspan></text>
+    <text x="${x0}" y="${noteY + 17}" font-size="10.5" fill="#2a5caa">Primary: ${fmt(r.inputs.stirrupLegs,0)} legs ${r.inputs.stirrupBar} @ ${fmt(r.inputs.stirrupSpacing,0)} mm</text>
+    <text x="${x0}" y="${noteY + 34}" font-size="10.5" fill="#b3261e">Add: ${fmt(r.inputs.dowelLegs,0)} legs ${r.inputs.dowelBar} @ ${fmt(r.inputs.dowelSpacing,0)} mm</text>
+    <text x="${x0}" y="${noteY + 51}" font-size="10.5" fill="#1f2937">Bottom: ${fmt(r.inputs.mainCount,0)}-${r.inputs.mainBar}; bar diameters shown to drawing scale</text>
   </svg>`;
 }
 
@@ -713,6 +811,73 @@ function downloadCsv() {
   URL.revokeObjectURL(url);
 }
 
+function niceSpacing(limit) {
+  const options = [600, 550, 500, 450, 400, 375, 350, 325, 300, 275, 250, 225, 200, 175, 150, 125, 100, 75];
+  const positive = Number.isFinite(limit) && limit > 0 ? limit : 75;
+  return options.find(v => v <= positive) || 75;
+}
+
+function previewAutoDesign(apply = false) {
+  if (!lastResult) runCalculations();
+  const r = lastResult;
+  const s = r.summary;
+  const strategy = $("autoStrategy") ? val("autoStrategy") : "primaryOnly";
+  const zones = $("autoZoneCount") ? val("autoZoneCount") : "1";
+  const maxPractical = Math.max(75, num("autoMaxSpacing") || 450);
+  const primarySet = s.stirrupAvSet;
+  const dowel = rebar(r.inputs.dowelBar);
+  const preferredDowelLegs = Math.max(4, Math.round(r.inputs.dowelLegs || 4));
+  const dowelSet = preferredDowelLegs * dowel.area;
+  let newPrimarySpacing = r.inputs.stirrupSpacing;
+  let newDowelLegs = r.inputs.dowelLegs;
+  let newDowelSpacing = r.inputs.dowelSpacing;
+  let message = "";
+
+  const minSteelSpacingLimit = primarySet > 0 ? primarySet * Math.max(1, r.inputs.fy) / Math.max(1, 0.06 * Math.sqrt(Math.max(0, r.inputs.fc)) * r.section.b) : 75;
+
+  if (strategy === "primaryOnly") {
+    const totalReq = r.inputs.allocation === "balance" ? s.interfaceAvReqPerM + s.beamAvReqPerM : s.interfaceAvReqPerM;
+    const spacingLimit = Math.min(maxPractical, s.sMax, minSteelSpacingLimit, primarySet * 1000 / Math.max(1, totalReq));
+    newPrimarySpacing = niceSpacing(spacingLimit);
+    newDowelLegs = 0;
+    newDowelSpacing = r.inputs.dowelSpacing;
+    message = `Primary-only proposal: ${fmt(r.inputs.stirrupLegs,0)} legs ${r.inputs.stirrupBar} @ ${newPrimarySpacing} mm. Additional dowels set to 0.`;
+  } else if (strategy === "addDowels") {
+    const deficit = Math.max(0, s.interfaceAvReqPerM - s.unusedStirrupAv);
+    if (deficit <= 0) {
+      newDowelLegs = 0;
+      message = `Existing primary detail has enough interface balance. No added dowels required by the selected method.`;
+    } else {
+      newDowelLegs = preferredDowelLegs;
+      newDowelSpacing = niceSpacing(Math.min(maxPractical, dowelSet * 1000 / deficit));
+      message = `Added-dowel proposal: keep primary @ ${fmt(r.inputs.stirrupSpacing,0)} mm; add ${newDowelLegs} legs ${r.inputs.dowelBar} @ ${newDowelSpacing} mm.`;
+    }
+  } else {
+    newPrimarySpacing = niceSpacing(Math.min(maxPractical, s.sMax, minSteelSpacingLimit, r.inputs.stirrupSpacing));
+    const newPrimaryPerM = primarySet / Math.max(1, newPrimarySpacing) * 1000;
+    const unused = r.inputs.allocation === "balance" ? Math.max(0, newPrimaryPerM - s.beamAvReqPerM) : newPrimaryPerM;
+    const deficit = Math.max(0, s.interfaceAvReqPerM - unused);
+    if (deficit <= 0) {
+      newDowelLegs = 0;
+      message = `Hybrid proposal: tighten primary to ${fmt(r.inputs.stirrupLegs,0)} legs ${r.inputs.stirrupBar} @ ${newPrimarySpacing} mm. No added dowels required.`;
+    } else {
+      newDowelLegs = preferredDowelLegs;
+      newDowelSpacing = niceSpacing(Math.min(maxPractical, dowelSet * 1000 / deficit));
+      message = `Hybrid proposal: primary @ ${newPrimarySpacing} mm plus ${newDowelLegs} legs ${r.inputs.dowelBar} @ ${newDowelSpacing} mm.`;
+    }
+  }
+
+  const zoneNote = zones === "3" ? " Zone concept: support zones A use this selected detail; zone B can be relaxed after checking the local station envelope." : " Uniform detail is applied for the whole member in the current input model.";
+  if ($("autoDesignResult")) $("autoDesignResult").textContent = message + zoneNote;
+
+  if (apply) {
+    $("stirrupSpacing").value = newPrimarySpacing;
+    $("dowelLegs").value = newDowelLegs;
+    $("dowelSpacing").value = newDowelSpacing;
+    runCalculations();
+  }
+}
+
 function attachEvents() {
   document.querySelectorAll("input, select").forEach(el => {
     el.addEventListener("change", () => {
@@ -726,6 +891,10 @@ function attachEvents() {
   $("runButton").addEventListener("click", runCalculations);
   $("resetDefaults").addEventListener("click", () => { applyDefaults(); runCalculations(); });
   $("downloadCsv").addEventListener("click", downloadCsv);
+  if ($("autoDesignButton")) $("autoDesignButton").addEventListener("click", () => { $("autoDesignPanel").hidden = !$('autoDesignPanel').hidden; previewAutoDesign(false); });
+  if ($("closeAutoDesign")) $("closeAutoDesign").addEventListener("click", () => { $("autoDesignPanel").hidden = true; });
+  if ($("previewAutoDesign")) $("previewAutoDesign").addEventListener("click", () => previewAutoDesign(false));
+  if ($("applyAutoDesign")) $("applyAutoDesign").addEventListener("click", () => previewAutoDesign(true));
 }
 
 document.addEventListener("DOMContentLoaded", () => {

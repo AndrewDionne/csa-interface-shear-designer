@@ -403,3 +403,135 @@ code {
   .grid.two, .charts, .summary-grid, .checks-grid { grid-template-columns: 1fr; }
   .inputs-panel label { grid-template-columns: 1fr; }
 }
+
+/* v4 graphics/interface refinements */
+.button-row {
+  display: grid;
+  grid-template-columns: 1fr 132px;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.secondary-button {
+  border: 1px solid #c7d1dc;
+  border-radius: 14px;
+  padding: 10px 12px;
+  font-weight: 850;
+  cursor: pointer;
+  background: #f7fafc;
+  color: #123a63;
+}
+
+.secondary-button:hover { background: #edf4fb; }
+
+.mini-button {
+  border: 0;
+  background: #edf2f7;
+  color: #29435d;
+  border-radius: 999px;
+  width: 28px;
+  height: 28px;
+  font-size: 18px;
+  font-weight: 900;
+  cursor: pointer;
+}
+
+.auto-design-panel {
+  margin-top: 12px;
+  border: 1px solid #cfe0f2;
+  background: #f8fbff;
+  border-radius: 16px;
+  padding: 12px;
+  box-shadow: 0 12px 25px rgba(18, 32, 47, 0.08);
+}
+
+.auto-design-panel[hidden] { display: none; }
+
+.auto-design-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.auto-design-head h3 { margin: 0; }
+
+.auto-design-panel label {
+  grid-template-columns: 1fr;
+  margin-bottom: 9px;
+}
+
+.auto-design-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-top: 6px;
+}
+
+.auto-design-result {
+  margin-top: 10px;
+  padding: 9px 10px;
+  border-radius: 12px;
+  border: 1px dashed #bed0e4;
+  background: white;
+  color: #34495e;
+  font-size: 0.79rem;
+  line-height: 1.35;
+}
+
+.summary-grid {
+  grid-template-columns: repeat(7, minmax(102px, 1fr));
+  gap: 7px;
+}
+
+.summary-grid .card {
+  padding: 8px 9px;
+  min-height: 58px;
+  border-radius: 13px;
+}
+
+.summary-grid .card .label {
+  font-size: 0.64rem;
+  letter-spacing: 0.045em;
+}
+
+.summary-grid .card .value {
+  font-size: 0.98rem;
+  line-height: 1.05;
+  margin-top: 3px;
+}
+
+.summary-grid .card .note {
+  font-size: 0.66rem;
+  line-height: 1.18;
+  margin-top: 3px;
+}
+
+.graphics-layout {
+  grid-template-columns: minmax(660px, 1fr) minmax(300px, 330px);
+  align-items: stretch;
+}
+
+#beamElevation svg {
+  width: 100%;
+  max-height: 465px;
+}
+
+#crossSection {
+  min-height: 360px;
+}
+
+#crossSection svg {
+  width: 100%;
+  max-height: 360px;
+}
+
+@media (max-width: 1420px) {
+  .summary-grid { grid-template-columns: repeat(4, minmax(145px, 1fr)); }
+}
+
+@media (max-width: 1160px) {
+  .summary-grid { grid-template-columns: repeat(2, minmax(155px, 1fr)); }
+  .graphics-layout { grid-template-columns: 1fr; }
+}

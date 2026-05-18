@@ -515,7 +515,7 @@ code {
 
 #beamElevation svg {
   width: 100%;
-  max-height: 465px;
+  max-height: 640px;
 }
 
 #crossSection {
@@ -534,4 +534,19 @@ code {
 @media (max-width: 1160px) {
   .summary-grid { grid-template-columns: repeat(2, minmax(155px, 1fr)); }
   .graphics-layout { grid-template-columns: 1fr; }
+}
+
+
+/* v5: one aligned shaded diagram stack under beam elevation */
+#beamElevation {
+  align-items: flex-start;
+  padding: 12px 14px;
+}
+
+.graphics-layout {
+  align-items: start;
+}
+
+.aligned-diagram-note {
+  color: var(--muted);
 }

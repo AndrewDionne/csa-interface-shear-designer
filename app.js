@@ -524,7 +524,7 @@ function scaleX(x, L, left, width) {
   return left + (x / L) * width;
 }
 
-function miniPathData(stations, key, left, yTop, plotW, plotH, absMode) {
+function miniPathData(stations, key, left, yTop, plotW, plotH, absMode, positiveDown = false) {
   const xs = stations.map(s => s.x);
   const ys = stations.map(s => absMode ? Math.abs(s[key]) : s[key]);
   const xmin = Math.min(...xs), xmax = Math.max(...xs);
@@ -537,21 +537,54 @@ function miniPathData(stations, key, left, yTop, plotW, plotH, absMode) {
     ymin = 0;
   }
   const sx = x => left + ((x - xmin) / Math.max(1e-9, xmax - xmin)) * plotW;
-  const sy = y => yTop + (1 - ((y - ymin) / Math.max(1e-9, ymax - ymin))) * plotH;
-  const path = stations.map((d, i) => `${i === 0 ? "M" : "L"} ${sx(d.x).toFixed(2)} ${sy(absMode ? Math.abs(d[key]) : d[key]).toFixed(2)}`).join(" ");
-  return { path, zeroY: sy(0), ymax, ymin };
+  const sy = y => {
+    const ratio = (y - ymin) / Math.max(1e-9, ymax - ymin);
+    return positiveDown ? yTop + ratio * plotH : yTop + (1 - ratio) * plotH;
+  };
+  const valueAt = d => absMode ? Math.abs(d[key]) : d[key];
+  const path = stations.map((d, i) => `${i === 0 ? "M" : "L"} ${sx(d.x).toFixed(2)} ${sy(valueAt(d)).toFixed(2)}`).join(" ");
+  return { path, zeroY: sy(0), ymax, ymin, sx, sy };
 }
 
-function buildMiniDiagram(r, key, label, unit, yTop, left, plotW, plotH, absMode) {
-  const p = miniPathData(r.stations, key, left, yTop, plotW, plotH, absMode);
+function buildMiniDiagram(r, key, label, unit, yTop, left, plotW, plotH, absMode, options = {}) {
+  const positiveDown = Boolean(options.positiveDown);
+  const p = miniPathData(r.stations, key, left, yTop, plotW, plotH, absMode, positiveDown);
   const maxVal = Math.max(...r.stations.map(s => Math.abs(s[key])));
+  const bg = options.bg || "#f7fafc";
+  const stroke = options.stroke || "#1f6feb";
   return `
-    <text x="${left}" y="${yTop - 9}" font-size="12" font-weight="800" fill="#34495e">${label}</text>
-    <text x="${left + 92}" y="${yTop - 9}" font-size="11" fill="#667587">max ${fmt(maxVal, 1)} ${unit}</text>
-    <line x1="${left}" y1="${yTop}" x2="${left}" y2="${yTop + plotH}" stroke="#c7d1dc"/>
-    <line x1="${left}" y1="${yTop + plotH}" x2="${left + plotW}" y2="${yTop + plotH}" stroke="#c7d1dc"/>
-    ${!absMode ? `<line x1="${left}" y1="${p.zeroY}" x2="${left + plotW}" y2="${p.zeroY}" stroke="#dbe3ec" stroke-dasharray="4 4"/>` : ""}
-    <path d="${p.path}" fill="none" stroke="#1f6feb" stroke-width="2.2"/>`;
+    <g class="mini-demand-diagram">
+      <rect x="${left}" y="${yTop}" width="${plotW}" height="${plotH}" rx="8" fill="${bg}" stroke="#dbe3ec"/>
+      <text x="${left}" y="${yTop - 10}" font-size="12" font-weight="850" fill="#34495e">${label}</text>
+      <text x="${left + 112}" y="${yTop - 10}" font-size="11" fill="#667587">max ${fmt(maxVal, 1)} ${unit}</text>
+      <line x1="${left}" y1="${yTop + plotH}" x2="${left + plotW}" y2="${yTop + plotH}" stroke="#c7d1dc"/>
+      ${!absMode ? `<line x1="${left}" y1="${p.zeroY}" x2="${left + plotW}" y2="${p.zeroY}" stroke="#c7d1dc" stroke-dasharray="5 5"/>` : ""}
+      <path d="${p.path}" fill="none" stroke="${stroke}" stroke-width="2.7"/>
+      <text x="${left + 8}" y="${yTop + 17}" font-size="10.5" fill="#667587">${fmt(p.ymax, 1)}</text>
+      <text x="${left + 8}" y="${yTop + plotH - 7}" font-size="10.5" fill="#667587">${fmt(p.ymin, 1)}</text>
+      ${positiveDown ? `<text x="${left + plotW - 8}" y="${yTop + plotH - 8}" text-anchor="end" font-size="10.5" fill="#667587">+ sagging plotted downward, tension side</text>` : ""}
+    </g>`;
+}
+
+function buildMiniInterfaceDiagram(r, yTop, left, plotW, plotH) {
+  const qMax = Math.max(...r.stations.map(s => Math.abs(s.qDesign)));
+  const vMax = Math.max(...r.stations.map(s => Math.abs(s.vInterface)));
+  const local = r.stations.map(s => ({ x: s.x, qNorm: qMax > 0 ? Math.abs(s.qDesign) / qMax : 0 }));
+  const p = miniPathData(local, "qNorm", left, yTop, plotW, plotH, false, false);
+  const fillPath = `${p.path} L ${left + plotW} ${yTop + plotH} L ${left} ${yTop + plotH} Z`;
+  return `
+    <g class="mini-demand-diagram">
+      <rect x="${left}" y="${yTop}" width="${plotW}" height="${plotH}" rx="8" fill="#fffaf2" stroke="#ead7b5"/>
+      <text x="${left}" y="${yTop - 10}" font-size="12" font-weight="850" fill="#34495e">Interface q / v demand</text>
+      <text x="${left + 150}" y="${yTop - 10}" font-size="11" fill="#667587">max ${fmt(qMax, 1)} kN/m = ${fmt(vMax, 3)} MPa</text>
+      <line x1="${left}" y1="${yTop + plotH}" x2="${left + plotW}" y2="${yTop + plotH}" stroke="#d9c4a0"/>
+      <path d="${fillPath}" fill="#f3c77b" opacity="0.18"/>
+      <path d="${p.path}" fill="none" stroke="#b26a00" stroke-width="2.7"/>
+      <text x="${left + 8}" y="${yTop + 17}" font-size="10.5" fill="#806000">q: kN/m</text>
+      <text x="${left + plotW - 8}" y="${yTop + 17}" text-anchor="end" font-size="10.5" fill="#806000">v: MPa</text>
+      <text x="${left + 8}" y="${yTop + plotH - 7}" font-size="10.5" fill="#806000">0</text>
+      <text x="${left + plotW - 8}" y="${yTop + plotH - 7}" text-anchor="end" font-size="10.5" fill="#806000">same curve; v = q / b</text>
+    </g>`;
 }
 
 function buildShearZones(r, left, plotW, L, y) {
@@ -580,7 +613,7 @@ function buildShearZones(r, left, plotW, L, y) {
 }
 
 function renderElevation(r) {
-  const width = 980, height = 465, left = 78, right = 42;
+  const width = 980, height = 610, left = 78, right = 42;
   const L = beamLength(r.inputs);
   const plotW = width - left - right;
   const supports = supportLocations(r.inputs);
@@ -626,8 +659,10 @@ function renderElevation(r) {
        <text x="${scaleX(r.inputs.L1 + r.inputs.L2/2, L, left, plotW)}" y="${bottomY + 67}" text-anchor="middle" font-size="12">L2=${fmt(r.inputs.L2,2)} m</text>`
     : `<text x="${left + plotW/2}" y="${bottomY + 67}" text-anchor="middle" font-size="12">L=${fmt(r.inputs.L1,2)} m</text>`;
 
-  const miniM = buildMiniDiagram(r, "M", "Mf diagram", "kN·m", 238, left, plotW, 70, false);
-  const miniV = buildMiniDiagram(r, "V", "Vf diagram", "kN", 348, left, plotW, 70, false);
+  const diagramTop = Math.max(240, zoneY + 44);
+  const miniM = buildMiniDiagram(r, "M", "Mf diagram", "kN·m", diagramTop, left, plotW, 86, false, { positiveDown: true, bg: "#f7fbff" });
+  const miniV = buildMiniDiagram(r, "V", "Vf diagram", "kN", diagramTop + 112, left, plotW, 86, false, { bg: "#f7fafc" });
+  const miniInterface = buildMiniInterfaceDiagram(r, diagramTop + 224, left, plotW, 92);
 
   $("beamElevation").innerHTML = `<svg viewBox="0 0 ${width} ${height}" role="img" aria-label="Beam elevation with aligned demand diagrams">
     <defs>
@@ -655,6 +690,7 @@ function renderElevation(r) {
     ${buildShearZones(r, left, plotW, L, zoneY)}
     ${miniM}
     ${miniV}
+    ${miniInterface}
   </svg>`;
 }
 
@@ -742,10 +778,8 @@ function renderCrossSection(r) {
 }
 
 function renderCharts(r) {
-  drawChart("momentChart", r.stations, "x", "M", "kN·m", false);
-  drawChart("shearChart", r.stations, "x", "V", "kN", false);
-  drawChart("flowChart", r.stations, "x", "qDesign", "kN/m", true);
-  drawChart("stressChart", r.stations, "x", "vInterface", "MPa", true);
+  // Diagrams are now rendered once in the beam elevation panel so that demand
+  // curves stay vertically aligned with the member geometry.
 }
 
 function drawChart(id, data, xKey, yKey, unit, abs) {

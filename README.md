@@ -9,12 +9,17 @@ The app provides:
 - Cantilever beam analysis
 - Uniform factored load `Wf`
 - Optional point load `Pf` at distance `x`
-- `Mf`, `Vf`, `VQ/I`, and interface stress diagrams
+- `Mf`, `Vf`, `VQ/I`, `V/z`, and interface stress diagrams
+- Critical station insertion at supports, load points, zero-shear roots, and zone boundaries
 - Beam elevation graphic
 - Cross-section graphic showing slab placement, roughened interface, stirrups, dowels/hairpins, and bottom reinforcement
 - Canadian reinforcing bar lookup
-- Vertical beam shear check
-- Interface shear-transfer check
+- Vertical beam shear check updated to the provided CSA A23.3:24 shear excerpt, including Clause 11.3.6.3 simplified-method beta logic and Clause 11.3.6.4 general-method beta/theta logic
+- Interface shear-transfer check with Clause 11.5 references, expanded interface-condition presets, and separated beam/interface utilization
+- Component-based gross section properties with optional flanged/T-section input
+- Calculated flexural stress-block lever arm `z` for cracked `V/z` interface demand
+- Sign-aware flexural reasonableness check using bottom steel for positive moment and top steel for negative moment
+- Authoritative shear-zone schedule checks
 - Conservative "unused stirrup balance" allocation method:
   - first allocate required stirrup steel to vertical beam shear
   - then count the residual crossing steel toward interface shear
@@ -63,8 +68,9 @@ This is a design-aid application, not a substitute for project-specific engineer
 - reinforcement development and anchorage across the interface
 - bar congestion and constructability
 - whether the same reinforcement can reasonably be counted for both vertical shear and interface shear
-- minimum and maximum shear reinforcement spacing
+- minimum shear reinforcement and maximum spacing under the provided CSA A23.3:24 shear excerpt
 - flexural adequacy
+- deep-beam / D-region behaviour where flagged
 
 ## Default example
 
@@ -78,9 +84,41 @@ The default example is aligned with the prior worked calculation:
 - `f'c = 50 MPa`
 - `fy = 400 MPa`
 - bottom steel `28-35M`
+- top steel default `0-35M` unless negative-moment checks are needed
 - primary stirrups `8 legs 15M @ 450 mm`
 - additional interface hairpins `4 legs 15M @ 350 mm`
 
 ## Methodology
 
 See [`docs/methodology.md`](docs/methodology.md).
+
+
+## Patch notes in this version
+
+Implemented engineering and UX hardening items:
+
+- Removed the summed beam-shear + interface-shear utilization pass/fail check. The app now checks vertical beam shear and interface shear separately and reports the governing maximum.
+- Made the scheduled zones authoritative for vertical shear strength, spacing, minimum steel, and interface checks.
+- Added component-based gross-section properties and an optional flanged/T-section model.
+- Added calculated stress-block `z` for cracked force-flow demand, with manual `z/d` still available as an override.
+- Added top longitudinal steel inputs and sign-aware flexural reasonableness checks.
+- Added a general-method shear option using εx-based β and θ inputs/calculation fields.
+- Added critical station insertion at supports, `d`/`dv` offsets, zone boundaries, point-load locations, and zero-shear roots.
+- Added a compliance dashboard that distinguishes analysis model review, strength checks, limited detailing checks, and incomplete CSA compliance scope.
+- Added a hybrid auto-design strategy: tighten primary stirrups first, then add dowels/hairpins only if required.
+
+Additional changes in this patch:
+
+- Added CSA A23.3:24 clause references in the UI/report for Clauses 11.2.8, 11.3, and 11.5 from the provided excerpt.
+- Updated simplified shear beta expressions to distinguish Eq. 11.1 minimum transverse reinforcement cases from no-minimum-transverse-reinforcement cases.
+- Updated general-method shear expressions to use Eq. 11.11, Eq. 11.12, and the non-prestressed/no-axial-load form of Eq. 11.13 with `Mf/dv` not less than `Vf`.
+- Added automatic `sze` handling for the general method, including `sze = 300 mm` where Eq. 11.1 minimum transverse reinforcement is provided and Eq. 11.10 where it is not.
+- Corrected the high-shear spacing threshold to use `0.125 λϕc f′c bw dv`, not `sqrt(f′c)`.
+- Added interface presets for monolithic concrete and concrete anchored to as-rolled structural steel from Clause 11.5.2.
+
+Still intentionally deferred:
+
+- Full CSA A23.3-24 edition selector and full-standard clause lock-in beyond the uploaded shear excerpt.
+- Normal force, inclined interface reinforcement, headed studs, post-installed bar options, and the alternative interface equation.
+- Development length, anchorage, splice, congestion, and full detailing compliance.
+- Torsion and strut-and-tie modelling.

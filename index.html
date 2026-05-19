@@ -13,6 +13,9 @@
       <h1>Cold Joint Interface Shear + Beam Shear Designer</h1>
       <p class="subhead">Static GitHub Pages app for transfer beams, two-span beams, cantilevers, and composite slab-on-beam cold-joint checks.</p>
     </div>
+    <div class="header-status">
+      <span id="overallStatus" class="status-chip warn">Review</span>
+    </div>
   </header>
 
   <main class="layout">
@@ -65,11 +68,23 @@
           <label>Total depth h, mm
             <input id="h" type="number" step="10" value="1800" />
           </label>
-          <label>Beam/interface width b, mm
+          <label>Gross section model
+            <select id="sectionModel">
+              <option value="rectangular" selected>Rectangular / same width throughout</option>
+              <option value="flanged">Flanged / T-section top flange</option>
+            </select>
+          </label>
+          <label>Web / interface width b<sub>w</sub>, mm
             <input id="b" type="number" step="10" value="3000" />
           </label>
-          <label>Second placement slab depth, mm
+          <label>Second placement depth t, mm
             <input id="slabDepth" type="number" step="10" value="350" />
+          </label>
+          <label>Flange width b<sub>f</sub>, mm
+            <input id="flangeWidth" type="number" step="10" value="3000" />
+          </label>
+          <label>Flange depth t<sub>f</sub>, mm
+            <input id="flangeDepth" type="number" step="10" value="350" />
           </label>
           <label>Concrete strength f'c, MPa
             <input id="fc" type="number" step="1" value="50" />
@@ -95,10 +110,32 @@
           <label>Main bottom bar count
             <input id="mainCount" type="number" step="1" value="28" />
           </label>
+          <label>Main top bar size
+            <select id="topBar"></select>
+          </label>
+          <label>Main top bar count
+            <input id="topCount" type="number" min="0" step="1" value="0" />
+          </label>
           <label>Design shear method
             <select id="shearMethod">
-              <option value="simplified" selected>Simplified CSA-style β = 0.18, θ = 35°</option>
+              <option value="simplified" selected>CSA A23.3:24 simplified method — Clause 11.3.6.3</option>
+              <option value="general">CSA A23.3:24 general method — Clause 11.3.6.4</option>
             </select>
+          </label>
+          <label>Nominal max aggregate size a<sub>g</sub>, mm
+            <input id="ag" type="number" min="0" step="1" value="20" />
+          </label>
+          <label>Steel modulus E<sub>s</sub>, MPa
+            <input id="Es" type="number" step="1000" value="200000" />
+          </label>
+          <label>s<sub>ze</sub> source
+            <select id="szeMode">
+              <option value="auto" selected>Auto per Clause 11.3.6.4 / Eq. 11.10</option>
+              <option value="manual">Manual override</option>
+            </select>
+          </label>
+          <label>Manual equivalent crack spacing s<sub>ze</sub>, mm
+            <input id="sze" type="number" step="25" value="300" />
           </label>
         </div>
       </details>
@@ -108,8 +145,10 @@
         <div class="grid two">
           <label>Interface condition
             <select id="interfaceCondition">
-              <option value="roughened" selected>Clean + intentionally roughened</option>
-              <option value="clean">Clean, not intentionally roughened</option>
+              <option value="roughened" selected>Clean + intentionally roughened ≥ 5 mm — Clause 11.5.2(b)</option>
+              <option value="clean">Clean, not intentionally roughened — Clause 11.5.2(a)</option>
+              <option value="monolithic">Placed monolithically — Clause 11.5.2(c)</option>
+              <option value="steel">Anchored to as-rolled steel — Clause 11.5.2(d)</option>
               <option value="custom">Custom c and μ</option>
             </select>
           </label>
@@ -126,7 +165,13 @@
           <label>Friction coefficient μ
             <input id="mu" type="number" step="0.05" value="1.00" />
           </label>
-          <label>Compression block lever-arm factor z/d
+          <label>z calculation
+            <select id="zMode">
+              <option value="auto" selected>Calculate from flexural stress block</option>
+              <option value="factor">Manual z/d factor</option>
+            </select>
+          </label>
+          <label>Manual lever-arm factor z/d
             <input id="zFactor" type="number" step="0.01" value="0.96" />
           </label>
           <label>Allocation method
@@ -182,6 +227,7 @@
             <select id="zoneDesignStrategy">
               <option value="primaryFirst" selected>Tighten primary stirrups first</option>
               <option value="addDowels">Keep primary spacing + add dowels</option>
+              <option value="hybrid">Hybrid: tighten primary, then add dowels</option>
             </select>
           </label>
           <label>Minimum practical spacing, mm
@@ -234,6 +280,14 @@
     </section>
 
     <section class="main-results">
+      <section class="panel compliance-panel">
+        <div class="panel-title">
+          <h2>Compliance dashboard</h2>
+          <div class="small-muted">Separated checks; no summed beam/interface interaction ratio.</div>
+        </div>
+        <div class="compliance-grid" id="complianceGrid"></div>
+      </section>
+
       <section class="panel">
         <div class="panel-title">
           <h2>Demand summary</h2>

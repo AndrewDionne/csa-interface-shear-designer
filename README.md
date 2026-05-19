@@ -6,18 +6,18 @@ The app provides:
 
 - Single-span simply supported beam analysis
 - Two-span continuous beam analysis using a small Euler-Bernoulli beam finite-element solver
-- Cantilever beam analysis
+- Span + cantilever overhang beam analysis
 - Uniform factored load `Wf`
 - Optional point load `Pf` at distance `x`
 - `Mf`, `Vf`, `VQ/I`, `V/z`, and interface stress diagrams
 - Critical station insertion at supports, load points, zero-shear roots, and zone boundaries
 - Beam elevation graphic
-- Cross-section graphic showing slab placement, roughened interface, stirrups, dowels/hairpins, and bottom reinforcement
+- Cross-section graphic showing slab placement, roughened interface, stirrups, dowels/hairpins, bottom/top reinforcement, and optional two-row longitudinal bar layouts
 - Canadian reinforcing bar lookup
 - Vertical beam shear check updated to the provided CSA A23.3:24 shear excerpt, including Clause 11.3.6.3 simplified-method beta logic and Clause 11.3.6.4 general-method beta/theta logic
 - Interface shear-transfer check with Clause 11.5 references, expanded interface-condition presets, and separated beam/interface utilization
 - Component-based gross section properties with optional flanged/T-section input
-- Calculated flexural stress-block lever arm `z` for cracked `V/z` interface demand
+- Calculated flexural stress-block lever arm `z` for cracked `V/z` interface demand, including longitudinal bar-row effects on `d`
 - Sign-aware flexural reasonableness check using bottom steel for positive moment and top steel for negative moment
 - Authoritative shear-zone schedule checks
 - Conservative "unused stirrup balance" allocation method:
@@ -143,3 +143,11 @@ See `docs/patch_notes_v20.md` for the zone-definition/assignment editor, span + 
 - Zone graphics now use thin light-grey stirrup interval lines instead of red/orange shaded zone fills.
 - Interface utilization remains based on the scheduled detail at the selected station and does not double-count primary stirrup steel when the balance allocation method is selected.
 
+
+
+## v22 calculation/report refinement
+
+- Added bottom and top longitudinal bar row controls with a shared vertical row spacing; selected two-row layouts now reduce the calculated effective depth `d`/`d-` through the longitudinal steel centroid.
+- Updated the cross-section graphic to show bottom and top longitudinal steel in the selected number of rows.
+- Revised Calculation Set 2 to show the compression-block calculation used to obtain a single reported cracked-force-flow lever arm `z`.
+- Revised Calculation Set 8 so the interface steel check is written in the requested sequence: required interface steel, unused stirrup balance, additional dowel requirement, dowel provided, then final required-versus-available result.

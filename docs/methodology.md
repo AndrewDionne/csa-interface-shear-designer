@@ -8,7 +8,7 @@ The app uses a small Euler-Bernoulli beam finite-element model with vertical tra
 
 - single-span simply supported
 - two-span continuous with simple vertical supports at left, middle, and right
-- cantilever with fixed left end
+- span + cantilever overhang: supports at the left end and at `L1`, with a free overhang of length `L2`
 - uniform factored load over the full length
 - one optional point load at a user-selected distance from the left end
 
@@ -74,7 +74,7 @@ The user can design for:
 
 ### z calculation
 
-The app can now calculate `z` from the flexural stress block instead of using only a fixed `z/d` factor. For a flexural stress-block check:
+The app calculates `z` from the flexural stress block for the cracked `V/z` demand calculation. For a flexural stress-block check:
 
 \[
 z = d - y_C
@@ -120,7 +120,7 @@ For transverse reinforcement perpendicular to the member axis:
 V_s = \phi_s\frac{A_v f_{yt} d_v\cot\theta}{s}
 \]
 
-The effective shear depth is calculated as:
+The effective depth `d` is calculated to the centroid of the selected bottom longitudinal bar layout. When two bottom rows are selected, the centroid is shifted inward by one-half of the specified row spacing, reducing `d`. The effective shear depth is calculated as:
 
 \[
 d_v = \max(0.9d,\ 0.72h)
@@ -382,3 +382,10 @@ The app performs a limited detailing review for scheduled spacing, minimum shear
 - discontinuity-region design
 
 Deep-beam/D-region conditions are flagged only. No strut-and-tie model is included.
+
+
+## v22 notes
+
+The section/material input now includes bottom bar rows, top bar rows, and vertical bar row spacing. These values affect the calculated longitudinal steel centroid and therefore the effective depths used by the flexural reasonableness check, the shear depth calculation, and the cracked-force-flow lever arm calculation.
+
+Calculation Set 8 now reports the interface reinforcement balance in this order: required interface steel, provided primary stirrup steel, portion consumed by vertical beam shear, unused stirrup balance, additional steel required, provided dowels/hairpins, and final required-versus-available status.

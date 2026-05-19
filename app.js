@@ -32,8 +32,11 @@ const DEFAULTS = {
   cover: 50,
   mainBar: "35M",
   mainCount: 28,
+  bottomRows: 1,
   topBar: "35M",
   topCount: 0,
+  topRows: 1,
+  barRowSpacing: 75,
   shearMethod: "simplified",
   Es: 200000,
   ag: 20,
@@ -647,8 +650,11 @@ function collectInputs() {
     cover: num("cover"),
     mainBar: val("mainBar"),
     mainCount: num("mainCount"),
+    bottomRows: num("bottomRows"),
     topBar: val("topBar"),
     topCount: num("topCount"),
+    topRows: num("topRows"),
+    barRowSpacing: num("barRowSpacing"),
     shearMethod: val("shearMethod"),
     Es: num("Es"),
     ag: num("ag"),
@@ -685,7 +691,10 @@ function collectInputs() {
   inputs.flangeDepth = Math.max(0, Math.min(inputs.h, inputs.flangeDepth || inputs.slabDepth || 0));
   inputs.slabDepth = Math.max(0, Math.min(inputs.h, inputs.slabDepth || 0));
   inputs.mainCount = Math.max(0, Math.round(inputs.mainCount || 0));
+  inputs.bottomRows = Math.max(1, Math.min(2, Math.round(inputs.bottomRows || 1)));
   inputs.topCount = Math.max(0, Math.round(inputs.topCount || 0));
+  inputs.topRows = Math.max(1, Math.min(2, Math.round(inputs.topRows || 1)));
+  inputs.barRowSpacing = Math.max(25, inputs.barRowSpacing || 75);
   inputs.Es = Math.max(1, inputs.Es || 200000);
   inputs.ag = Math.max(0, inputs.ag || 20);
   inputs.szeMode = inputs.szeMode === "manual" ? "manual" : "auto";
@@ -807,6 +816,15 @@ function computeFlexuralCapacityForFace(inputs, section, As, d, face = "top") {
   return { alpha1, beta1, As, a, c, compressionCentroid: comp.centroidFromFace, z, Mr, available: true };
 }
 
+function longitudinalCentroidFromFace(inputs, bar, count, rows) {
+  const n = Math.max(0, Math.round(count || 0));
+  if (n <= 0) return inputs.cover + bar.diameter / 2;
+  const rowCount = Math.max(1, Math.min(2, Math.round(rows || 1)));
+  const usedRows = n <= 1 ? 1 : rowCount;
+  const base = Math.max(0, inputs.cover) + rebar(inputs.stirrupBar).diameter + bar.diameter / 2;
+  return base + (usedRows - 1) * Math.max(25, inputs.barRowSpacing || 75) / 2;
+}
+
 function computeSection(inputs) {
   const main = rebar(inputs.mainBar);
   const topBar = rebar(inputs.topBar || inputs.mainBar);
@@ -818,8 +836,10 @@ function computeSection(inputs) {
   const gross = grossPropertiesFromComponents(components);
   const areaAbove = areaAboveInterfaceFromComponents(components, slabDepth);
   const Q = Math.max(0, areaAbove.area * (gross.ybar - areaAbove.centroid));
-  const dBottom = h - inputs.cover - stirrup.diameter - main.diameter / 2;
-  const dTop = h - inputs.cover - stirrup.diameter - topBar.diameter / 2;
+  const bottomCentroidFromBottom = longitudinalCentroidFromFace(inputs, main, inputs.mainCount, inputs.bottomRows);
+  const topCentroidFromTop = longitudinalCentroidFromFace(inputs, topBar, inputs.topCount, inputs.topRows);
+  const dBottom = h - bottomCentroidFromBottom;
+  const dTop = h - topCentroidFromTop;
   const d = Math.max(1, dBottom);
   const dv = Math.max(0.9 * d, 0.72 * h);
   const AsBottom = Math.max(0, inputs.mainCount * main.area);
@@ -827,10 +847,15 @@ function computeSection(inputs) {
 
   const flexPos = computeFlexuralCapacityForFace(inputs, { components, h }, AsBottom, dBottom, "top");
   const flexNeg = computeFlexuralCapacityForFace(inputs, { components, h }, AsTop, dTop, "bottom");
-  const autoZCandidates = [flexPos.z, flexNeg.available ? flexNeg.z : Infinity].filter(Number.isFinite).filter(v => v > 0);
-  const autoZ = autoZCandidates.length ? Math.min(...autoZCandidates) : Math.max(0.5 * d, 0.9 * d);
+  const zOptions = [
+    { source: "positive-moment compression block", flex: flexPos, z: flexPos.z, available: flexPos.available },
+    { source: "negative-moment compression block", flex: flexNeg, z: flexNeg.z, available: flexNeg.available }
+  ].filter(o => o.available && Number.isFinite(o.z) && o.z > 0);
+  const zSelected = zOptions.length ? zOptions.reduce((best, cur) => cur.z < best.z ? cur : best, zOptions[0]) : { source: "fallback lever arm", flex: flexPos, z: Math.max(0.5 * d, 0.9 * d), available: false };
+  const autoZ = zSelected.z;
   const manualZ = Math.max(0.5 * d, (inputs.zFactor || 0.9) * d);
   const z = inputs.zMode === "factor" ? manualZ : autoZ;
+  const zBlock = inputs.zMode === "factor" ? { source: "manual z/d override", flex: flexPos, z } : zSelected;
 
   return {
     components,
@@ -843,10 +868,18 @@ function computeSection(inputs) {
     d,
     dBottom,
     dTop,
+    bottomRows: inputs.bottomRows,
+    topRows: inputs.topRows,
+    barRowSpacing: inputs.barRowSpacing,
+    bottomCentroidFromBottom,
+    topCentroidFromTop,
     dv,
     z,
     zAuto: autoZ,
     zManual: manualZ,
+    zSource: zBlock.source,
+    zBlock: zBlock.flex,
+    zBlockAvailable: zBlock.available,
     As: AsBottom,
     AsBottom,
     AsTop,
@@ -1706,7 +1739,7 @@ function renderSummary(r) {
     card("Max |Vf|", `${fmt(s.maxV, 0)} kN`, reactions),
     card("Max |Mf|", `${fmt(s.maxMabs, 0)} kN·m`, `+${fmt(s.maxMpos, 0)}, hog ${fmt(s.maxMneg, 0)}`),
     card("Max q + v", `${fmt(s.maxQ, 0)} kN/m · ${fmt(s.maxStress, 3)} MPa`, demandModelLabel(r.inputs.interfaceDemandModel)),
-    card("dv / d / z", `${fmt(r.section.dv, 0)} / ${fmt(r.section.d, 0)} / ${fmt(r.section.z, 0)} mm`, r.inputs.zMode === "auto" ? "z from stress block" : "manual z/d"),
+    card("dv / d / z", `${fmt(r.section.dv, 0)} / ${fmt(r.section.d, 0)} / ${fmt(r.section.z, 0)} mm`, r.inputs.zMode === "auto" ? `${r.section.zSource}; bottom bars ${r.inputs.bottomRows} row${r.inputs.bottomRows > 1 ? "s" : ""}` : "manual z/d"),
     card("Beam shear steel", `${fmt(s.beamAvReqPerM, 0)} mm²/m`, `Vc=${fmt(s.Vc, 0)} kN`),
     card("Interface steel", `${fmt(s.interfaceAvReqPerM, 0)} req · ${fmt(s.additionalInterfaceReq, 0)} add`, interfaceConditionLabel(r.inputs.interfaceCondition)),
     card("Flexural utilization", `${fmt(s.flexRatio, 2)}`, `+ ${fmt(s.flex.posRatio,2)} · − ${fmt(s.flex.negRatio,2)}`),
@@ -2287,9 +2320,11 @@ function renderCrossSection(r) {
   const secH = r.inputs.h * scale;
   const slabH = r.section.slabDepth * scale;
   const main = rebar(r.inputs.mainBar);
+  const topMain = rebar(r.inputs.topBar || r.inputs.mainBar);
   const stirrup = rebar(zoneStirrupBar);
   const dowel = rebar(zoneDowelBar);
   const mainR = Math.max(2.0, (main.diameter * scale) / 2);
+  const topMainR = Math.max(2.0, (topMain.diameter * scale) / 2);
   const stirrupW = Math.max(1.5, stirrup.diameter * scale);
   const dowelW = Math.max(1.5, dowel.diameter * scale);
   const coverPx = Math.max(5, r.inputs.cover * scale);
@@ -2298,23 +2333,35 @@ function renderCrossSection(r) {
   const innerY0 = y0 + coverPx;
   const innerY1 = y0 + secH - coverPx;
 
-  const count = Math.max(1, Math.round(r.inputs.mainCount));
-  const rows = count === 1 ? 1 : 2;
-  const bottomCount = rows === 1 ? count : Math.ceil(count / 2);
-  const topCount = rows === 1 ? 0 : count - bottomCount;
-  const rowGap = Math.max(2.9 * mainR, 12);
-  const bottomYBars = innerY1 - mainR;
-  const topYBars = bottomYBars - rowGap;
+  const bottomCountTotal = Math.max(0, Math.round(r.inputs.mainCount));
+  const bottomRows = bottomCountTotal <= 1 ? 1 : Math.max(1, Math.min(2, Math.round(r.inputs.bottomRows || 1)));
+  const bottomNearCount = bottomRows === 1 ? bottomCountTotal : Math.ceil(bottomCountTotal / 2);
+  const bottomFarCount = bottomRows === 1 ? 0 : bottomCountTotal - bottomNearCount;
+  const topCountTotal = Math.max(0, Math.round(r.inputs.topCount || 0));
+  const topRows = topCountTotal <= 1 ? 1 : Math.max(1, Math.min(2, Math.round(r.inputs.topRows || 1)));
+  const topNearCount = topRows === 1 ? topCountTotal : Math.ceil(topCountTotal / 2);
+  const topFarCount = topRows === 1 ? 0 : topCountTotal - topNearCount;
+  const bottomRowGap = Math.max((r.inputs.barRowSpacing || 75) * scale, 2.9 * mainR, 12);
+  const topRowGap = Math.max((r.inputs.barRowSpacing || 75) * scale, 2.9 * topMainR, 12);
+  const bottomYNear = innerY1 - mainR;
+  const bottomYFar = bottomYNear - bottomRowGap;
+  const topYNear = innerY0 + topMainR;
+  const topYFar = topYNear + topRowGap;
 
-  function rowBars(n, y) {
+  function rowBars(n, y, radius, fill = "#1f2937") {
     if (n <= 0) return "";
-    const usable = Math.max(0, innerX1 - innerX0 - 2 * mainR);
+    const usable = Math.max(0, innerX1 - innerX0 - 2 * radius);
     return Array.from({ length: n }, (_, i) => {
-      const bx = n === 1 ? (innerX0 + innerX1) / 2 : innerX0 + mainR + i * (usable / Math.max(1, n - 1));
-      return `<circle cx="${bx}" cy="${y}" r="${mainR}" fill="#1f2937"/>`;
+      const bx = n === 1 ? (innerX0 + innerX1) / 2 : innerX0 + radius + i * (usable / Math.max(1, n - 1));
+      return `<circle cx="${bx}" cy="${y}" r="${radius}" fill="${fill}"/>`;
     }).join("");
   }
-  const bars = rowBars(topCount, topYBars) + rowBars(bottomCount, bottomYBars);
+  const bars = [
+    rowBars(topNearCount, topYNear, topMainR, "#374151"),
+    rowBars(topFarCount, topYFar, topMainR, "#374151"),
+    rowBars(bottomFarCount, bottomYFar, mainR, "#1f2937"),
+    rowBars(bottomNearCount, bottomYNear, mainR, "#1f2937")
+  ].join("");
 
   const stirrupLegs = Math.max(0, Math.round(zoneStirrupLegs));
   let legs = "";
@@ -2357,8 +2404,9 @@ function renderCrossSection(r) {
     <text x="${x0}" y="${noteY}" font-size="12" fill="#2d3b4d"><tspan font-weight="800">Second slab:</tspan> t=${fmt(r.inputs.slabDepth,0)} mm · <tspan fill="#6b4600" font-weight="800">roughened interface</tspan></text>
     <text x="${x0}" y="${noteY + 21}" font-size="12" fill="#2a5caa">Primary: ${fmt(zoneStirrupLegs,0)} legs ${zoneStirrupBar} @ ${fmt(zonePrimarySpacing,0)} mm${zone ? ` (${zone.name})` : ``}</text>
     <text x="${x0}" y="${noteY + 42}" font-size="12" fill="#b3261e">Add: ${zoneDowelLegs > 0 && zoneDowelSpacing ? `${fmt(zoneDowelLegs,0)} legs ${zoneDowelBar} @ ${fmt(zoneDowelSpacing,0)} mm` : `None`}</text>
-    <text x="${x0}" y="${noteY + 63}" font-size="12" fill="#1f2937">Bottom: ${fmt(r.inputs.mainCount,0)}-${r.inputs.mainBar}; shown in ${rows} row${rows>1?'s':''}</text>
-    <text x="${x0}" y="${noteY + 84}" font-size="11" fill="#667587">${localLine}</text>
+    <text x="${x0}" y="${noteY + 63}" font-size="12" fill="#1f2937">Bottom: ${fmt(r.inputs.mainCount,0)}-${r.inputs.mainBar}; ${bottomRows} row${bottomRows>1?'s':''}; d=${fmt(r.section.dBottom,0)} mm</text>
+    <text x="${x0}" y="${noteY + 84}" font-size="12" fill="#374151">Top: ${fmt(r.inputs.topCount,0)}-${r.inputs.topBar}; ${topRows} row${topRows>1?'s':''}; d₋=${fmt(r.section.dTop,0)} mm</text>
+    <text x="${x0}" y="${noteY + 105}" font-size="11" fill="#667587">${localLine}</text>
   </svg>`;
 }
 function renderCharts(r) {
@@ -2607,6 +2655,8 @@ function buildCalculationReportSections(r) {
   const primaryPerMm = s.stirrupAvPerM / 1000;
   const interfaceReqPerMm = s.interfaceAvReqPerM / 1000;
   const addReqPerMm = s.additionalInterfaceReq / 1000;
+  const interfaceSteelBalanceOk = s.totalInterfaceAvailable >= s.interfaceAvReqPerM - 1e-9;
+  const addedDowelOk = s.dowelAvPerM >= s.additionalInterfaceReq - 1e-9;
   const minLen = zoneMinimumLength(r);
   const qFormula = i.interfaceDemandModel === "cracked"
     ? `${sub("q", "f")} = ${ffrac("|V<sub>f</sub>| × 1000", "z")}`
@@ -2664,16 +2714,16 @@ function buildCalculationReportSections(r) {
           ["Code basis", `CSA A23.3:24 shear excerpt: Clauses 11.2.8, 11.3, and 11.5. Full anchorage/detailing still require engineering review.`],
           ["Materials", `f′c=${fmt(i.fc,2)} MPa; fy=${fmt(i.fy,0)} MPa; a_g=${fmt(i.ag,0)} mm; λ=${fmt(i.lambda,2)}; ϕc=${fmt(i.phiC,2)}; ϕs=${fmt(i.phiS,2)}`],
           ["Interface", `${interfaceConditionLabel(i.interfaceCondition)}; c=${fmt(i.cohesion,2)} MPa; μ=${fmt(i.mu,2)}; demand model=${qModel}`],
-          ["Reinforcement basis", `Bottom steel ${fmt(i.mainCount,0)}-${i.mainBar}; top steel ${fmt(i.topCount,0)}-${i.topBar}; primary shear ${fmt(i.stirrupLegs,0)} legs ${i.stirrupBar}; additional dowel/hairpin ${fmt(i.dowelLegs,0)} legs ${i.dowelBar}`],
+          ["Reinforcement basis", `Bottom steel ${fmt(i.mainCount,0)}-${i.mainBar} in ${fmt(i.bottomRows,0)} row${i.bottomRows > 1 ? "s" : ""}; top steel ${fmt(i.topCount,0)}-${i.topBar} in ${fmt(i.topRows,0)} row${i.topRows > 1 ? "s" : ""}; row spacing ${fmt(i.barRowSpacing,0)} mm; primary shear ${fmt(i.stirrupLegs,0)} legs ${i.stirrupBar}; additional dowel/hairpin ${fmt(i.dowelLegs,0)} legs ${i.dowelBar}`],
           ["Zone rules", `${i.zoneDesignMode}; spacing range ${fmt(i.zoneMinSpacing,0)}–${fmt(i.zoneMaxSpacing,0)} mm; minimum zone length = max(user input, 2d) = ${fmt(minLen,2)} m`]
         ]),
         reportNote("Variables are introduced and defined in the calculation steps where they are first used.")
       ]
     },
     {
-      title: "2. Find the section geometry used for interface demand",
+      title: "2. Find the section geometry and compression block used for interface demand",
       blocks: [
-        reportText("<strong>Purpose of this step:</strong> determine the geometric properties required to convert the beam shear force into horizontal shear flow on the cold joint. The gross section properties are calculated from section components, so a rectangular section and an optional flanged/T-section use the same engine. For the elastic VQ/I method, the concrete above the cold joint is treated as the area that must be dragged horizontally relative to the beam below."),
+        reportText("<strong>Purpose of this step:</strong> determine the geometric properties required to convert the beam shear force into horizontal shear flow on the cold joint, then calculate one flexural compression-block lever arm, z, for the cracked-force-flow demand option. The gross section properties are calculated from section components, so a rectangular section and an optional flanged/T-section use the same engine."),
         reportFigure(sectionGeometryFigure(r), "Section geometry sketch showing the cold joint, slab area above the interface, neutral axis, and the first-moment lever arm used for Q."),
         reportTable(["Variable", "Meaning", "Current value"], [
           ["b", "beam/interface width", `${fmt(i.b,0)} mm`],
@@ -2683,9 +2733,10 @@ function buildCalculationReportSections(r) {
           ["A_above", "area above interface from section components", `${fmt(slabArea,0)} mm²`],
           ["Q", "first moment of A_above about the gross neutral axis", `${fmt(sec.Q,0)} mm³`],
           ["I_g", "gross second moment of area", `${fmt(sec.Ig,0)} mm⁴`],
-          ["d", "effective depth to bottom tension steel", `${fmt(sec.d,1)} mm`],
+          ["d", "effective depth to centroid of bottom tension steel", `${fmt(sec.d,1)} mm`],
+          ["bar rows", "longitudinal bar row layout used to calculate d", `bottom ${fmt(i.bottomRows,0)} row${i.bottomRows > 1 ? "s" : ""}; top ${fmt(i.topRows,0)} row${i.topRows > 1 ? "s" : ""}; row spacing ${fmt(i.barRowSpacing,0)} mm`],
           ["d_v", "effective shear depth", `${fmt(sec.dv,1)} mm`],
-          ["z", "lever arm for cracked force-flow demand", `${fmt(sec.z,1)} mm`]
+          ["z", "single lever arm used for cracked force-flow demand", `${fmt(sec.z,1)} mm (${sec.zSource})`]
         ]),
         reportText("The formulas below calculate those geometry terms step by step."),
         reportFormula(`I<sub>g</sub> = Σ(I<sub>component</sub> + AΔy²)`),
@@ -2696,13 +2747,18 @@ function buildCalculationReportSections(r) {
         reportResult(`A<sub>above</sub> = ${fmt(slabArea,0)} mm<sup>2</sup>; y<sub>above</sub> = ${fmt(slabCentroid,1)} mm`),
         reportFormula(`Q = A<sub>above</sub>(ȳ - y<sub>above</sub>) = ${fmt(slabArea,0)}(${fmt(na,1)} - ${fmt(slabCentroid,1)})`),
         reportResult(`Q = ${fmt(sec.Q,0)} mm<sup>3</sup>`),
-        reportFormula(`d = h - cover - d<sub>b,stirrup</sub> - d<sub>b,main</sub>/2 = ${fmt(i.h,0)} - ${fmt(i.cover,0)} - ${fmt(stirrup.diameter,1)} - ${fmt(main.diameter,1)}/2`),
+        reportFormula(`Bottom steel centroid from bottom face = cover + d<sub>b,stirrup</sub> + d<sub>b,main</sub>/2 + (rows - 1)s<sub>row</sub>/2`),
+        reportFormula(`y<sub>s,bottom</sub> = ${fmt(i.cover,0)} + ${fmt(stirrup.diameter,1)} + ${fmt(main.diameter,1)}/2 + (${fmt(i.bottomRows,0)} - 1)${fmt(i.barRowSpacing,0)}/2 = ${fmt(sec.bottomCentroidFromBottom,1)} mm`),
+        reportFormula(`d = h - y<sub>s,bottom</sub> = ${fmt(i.h,0)} - ${fmt(sec.bottomCentroidFromBottom,1)}`),
         reportResult(`d = ${fmt(sec.d,1)} mm`),
         reportFormula(`d<sub>v</sub> = max(0.9d, 0.72h) = max(${fmt(0.9*sec.d,1)}, ${fmt(0.72*i.h,1)})`),
         reportResult(`d<sub>v</sub> = ${fmt(sec.dv,1)} mm`),
-        reportFormula(i.zMode === "auto" ? `z = d - y<sub>compression block</sub>, calculated from the flexural stress block; governing z = min(z<sub>+</sub>, z<sub>-</sub> where top steel is present)` : `z = max(0.5d, ${fmt(i.zFactor,2)}d)`),
-        reportResult(`z = ${fmt(sec.z,1)} mm; z<sub>+</sub> = ${fmt(sec.flexPos.z,1)} mm${sec.flexNeg.available ? `; z<sub>-</sub> = ${fmt(sec.flexNeg.z,1)} mm` : "; z<sub>-</sub> not calculated because no top steel is defined"}`),
-        reportNote("The cracked force-flow lever arm z is related to the cracked neutral-axis/stress-block calculation, but it is not the neutral-axis depth itself. The app computes compression-block depth and centroid, then uses z = distance from tension steel to compression resultant.")
+        reportText("Compression-block calculation for the cracked force-flow lever arm:"),
+        reportFormula(`T = ϕ<sub>s</sub>A<sub>s</sub>f<sub>y</sub> = ${fmt(i.phiS,2)}(${fmt(sec.zBlock?.As || 0,0)})(${fmt(i.fy,0)}) = ${fmt((i.phiS * (sec.zBlock?.As || 0) * i.fy)/1000,1)} kN`),
+        reportFormula(`Solve a such that C = α<sub>1</sub>ϕ<sub>c</sub>f′<sub>c</sub>A<sub>comp</sub>(a) = T`),
+        reportResult(`α<sub>1</sub> = ${fmt(sec.zBlock?.alpha1 || 0,3)}; β<sub>1</sub> = ${fmt(sec.zBlock?.beta1 || 0,3)}; a = ${fmt(sec.zBlock?.a || 0,1)} mm; c = a/β<sub>1</sub> = ${fmt(sec.zBlock?.c || 0,1)} mm`),
+        reportFormula(`z = d - y<sub>C</sub>, where y<sub>C</sub> is the compression-resultant centroid from the compression face`),
+        reportResult(`y<sub>C</sub> = ${fmt(sec.zBlock?.compressionCentroid || 0,1)} mm; z = ${fmt(sec.z,1)} mm`)
       ]
     },
     {
@@ -2830,31 +2886,32 @@ function buildCalculationReportSections(r) {
       ]
     },
     {
-      title: "8. Determine unused stirrup balance and added dowel requirement",
+      title: "8. Determine required interface reinforcement, unused stirrup balance, and added dowels",
       blocks: [
-        reportText("<strong>Purpose of this step:</strong> avoid double-counting the same crossing stirrup steel for both vertical beam shear and interface shear-transfer. The selected conservative allocation method first 'spends' the portion of A_v/s needed for vertical beam shear, then credits only the unused balance to the cold-joint interface. Any remaining shortfall becomes additional dowel or hairpin reinforcement."),
+        reportText("<strong>Purpose of this step:</strong> check the interface crossing-steel balance in the correct order: first find the required interface shear reinforcement, then subtract the portion of the primary stirrups already needed for vertical beam shear, then calculate the additional required interface steel, and finally compare that shortfall with the provided dowels/hairpins."),
         reportText(i.allocation === "balance"
-          ? "The selected allocation method subtracts the vertical beam shear steel demand from the crossing stirrup steel before crediting the remaining clamping steel to the interface."
-          : "The selected allocation method credits the full crossing stirrup steel to the interface check."),
+          ? "The selected allocation method avoids double counting: primary stirrups are first assigned to vertical beam shear, and only the unused portion is credited to interface shear-transfer."
+          : "The selected allocation method credits the full crossing stirrup steel to the interface check. The unused-balance lines are still shown for review, but the design is not using the conservative balance allocation."),
         reportTable(["Variable", "Meaning", "Current value"], [
-          ["(A_v/s)_prov", "provided crossing primary stirrup steel per unit length", `${fmt(s.stirrupAvPerM,0)} mm²/m`],
-          ["(A_v/s)_beam req", "portion required for vertical beam shear", `${fmt(s.beamAvReqPerM,0)} mm²/m`],
-          ["(A_v/s)_unused", "balance available for interface clamping", `${fmt(s.unusedStirrupAv,0)} mm²/m`],
-          ["(A_v/s)_add req", "additional interface reinforcement required", `${fmt(s.additionalInterfaceReq,0)} mm²/m`],
+          ["(A_v/s)_interface req", "required crossing steel from Calculation Set 7", `${fmt(s.interfaceAvReqPerM,0)} mm²/m`],
+          ["(A_v/s)_prov,stirrups", "provided primary stirrup steel crossing the interface", `${fmt(s.stirrupAvPerM,0)} mm²/m`],
+          ["(A_v/s)_beam req", "portion of primary stirrups required for vertical beam shear", `${fmt(s.beamAvReqPerM,0)} mm²/m`],
+          ["(A_v/s)_unused", "primary stirrup balance available for interface clamping", `${fmt(s.unusedStirrupAv,0)} mm²/m`],
+          ["(A_v/s)_add req", "required added dowel/hairpin steel after unused stirrup balance", `${fmt(s.additionalInterfaceReq,0)} mm²/m`],
           ["(A_v/s)_dowel", "provided added dowel/hairpin steel", `${fmt(s.dowelAvPerM,0)} mm²/m`],
-          ["(A_v/s)_available", "total steel available to the interface", `${fmt(s.totalInterfaceAvailable,0)} mm²/m`]
+          ["(A_v/s)_available", "unused stirrup balance plus dowels", `${fmt(s.totalInterfaceAvailable,0)} mm²/m`]
         ]),
-        reportFormula(`${ffrac("A<sub>v</sub>", "s")}<sub>prov</sub> = ${ffrac("A<sub>v,set</sub>", "s")} = ${ffrac(fmt(s.stirrupAvSet,0), fmt(i.stirrupSpacing,0))}`),
-        reportResult(`${ffrac("A<sub>v</sub>", "s")}<sub>prov</sub> = ${fmt(primaryPerMm,3)} mm<sup>2</sup>/mm = ${fmt(s.stirrupAvPerM,0)} mm<sup>2</sup>/m`),
-        reportFormula(`${ffrac("A<sub>v</sub>", "s")}<sub>unused</sub> = ${ffrac("A<sub>v</sub>", "s")}<sub>prov</sub> - ${ffrac("A<sub>v</sub>", "s")}<sub>beam req</sub> = ${fmt(s.stirrupAvPerM,0)} - ${fmt(s.beamAvReqPerM,0)}`),
+        reportFormula(`${ffrac("A<sub>v</sub>", "s")}<sub>interface req</sub> = ${fmt(s.interfaceAvReqPerM,0)} mm<sup>2</sup>/m`),
+        reportFormula(`${ffrac("A<sub>v</sub>", "s")}<sub>prov,stirrups</sub> = ${ffrac("A<sub>v,set</sub>", "s")} = ${ffrac(fmt(s.stirrupAvSet,0), fmt(i.stirrupSpacing,0))}`),
+        reportResult(`${ffrac("A<sub>v</sub>", "s")}<sub>prov,stirrups</sub> = ${fmt(primaryPerMm,3)} mm<sup>2</sup>/mm = ${fmt(s.stirrupAvPerM,0)} mm<sup>2</sup>/m`),
+        reportFormula(`${ffrac("A<sub>v</sub>", "s")}<sub>unused</sub> = max[0, ${ffrac("A<sub>v</sub>", "s")}<sub>prov,stirrups</sub> - ${ffrac("A<sub>v</sub>", "s")}<sub>beam req</sub>] = max[0, ${fmt(s.stirrupAvPerM,0)} - ${fmt(s.beamAvReqPerM,0)}]`),
         reportResult(`${ffrac("A<sub>v</sub>", "s")}<sub>unused</sub> = ${fmt(s.unusedStirrupAv,0)} mm<sup>2</sup>/m`),
-        reportFormula(`${ffrac("A<sub>v</sub>", "s")}<sub>add req</sub> = max[0, ${ffrac("A<sub>v</sub>", "s")}<sub>interface req</sub> - ${ffrac("A<sub>v</sub>", "s")}<sub>unused</sub>]`),
+        reportFormula(`${ffrac("A<sub>v</sub>", "s")}<sub>add req</sub> = max[0, ${ffrac("A<sub>v</sub>", "s")}<sub>interface req</sub> - ${ffrac("A<sub>v</sub>", "s")}<sub>unused</sub>] = max[0, ${fmt(s.interfaceAvReqPerM,0)} - ${fmt(s.unusedStirrupAv,0)}]`),
         reportResult(`${ffrac("A<sub>v</sub>", "s")}<sub>add req</sub> = ${fmt(addReqPerMm,3)} mm<sup>2</sup>/mm = ${fmt(s.additionalInterfaceReq,0)} mm<sup>2</sup>/m`),
         reportFormula(`${ffrac("A<sub>v</sub>", "s")}<sub>dowel</sub> = ${ffrac(`${fmt(i.dowelLegs,0)}(${fmt(dowel.area,0)})`, fmt(i.dowelSpacing,0))}`),
-        reportResult(`${ffrac("A<sub>v</sub>", "s")}<sub>dowel</sub> = ${fmt(s.dowelAvPerM,0)} mm<sup>2</sup>/m`),
-        reportFormula(`${ffrac("A<sub>v</sub>", "s")}<sub>available</sub> = ${ffrac("A<sub>v</sub>", "s")}<sub>unused</sub> + ${ffrac("A<sub>v</sub>", "s")}<sub>dowel</sub>`),
-        reportResult(`${ffrac("A<sub>v</sub>", "s")}<sub>available</sub> = ${fmt(s.totalInterfaceAvailable,0)} mm<sup>2</sup>/m → ${reportStatusHtml(s.interfaceOk)}`, s.interfaceOk),
-        reportNote("The zone schedule below repeats this allocation locally using each zone's selected spacing and governing station.")
+        reportResult(`${ffrac("A<sub>v</sub>", "s")}<sub>dowel</sub> = ${fmt(s.dowelAvPerM,0)} mm<sup>2</sup>/m; required added amount = ${fmt(s.additionalInterfaceReq,0)} mm<sup>2</sup>/m → ${reportStatusHtml(addedDowelOk)}`, addedDowelOk),
+        reportFormula(`${ffrac("A<sub>v</sub>", "s")}<sub>available</sub> = ${ffrac("A<sub>v</sub>", "s")}<sub>unused</sub> + ${ffrac("A<sub>v</sub>", "s")}<sub>dowel</sub> = ${fmt(s.unusedStirrupAv,0)} + ${fmt(s.dowelAvPerM,0)} = ${fmt(s.totalInterfaceAvailable,0)} mm<sup>2</sup>/m`),
+        reportResult(`${ffrac("A<sub>v</sub>", "s")}<sub>interface req</sub> ${interfaceSteelBalanceOk ? "≤" : ">"} ${ffrac("A<sub>v</sub>", "s")}<sub>unused</sub> + ${ffrac("A<sub>v</sub>", "s")}<sub>dowel</sub> : ${fmt(s.interfaceAvReqPerM,0)} ${interfaceSteelBalanceOk ? "≤" : ">"} ${fmt(s.unusedStirrupAv,0)} + ${fmt(s.dowelAvPerM,0)} = ${fmt(s.totalInterfaceAvailable,0)} → ${reportStatusHtml(interfaceSteelBalanceOk)}`, interfaceSteelBalanceOk)
       ]
     },
     {
@@ -3119,6 +3176,7 @@ function setStationFromClientX(clientX) {
   }
   selectedStationIndex = closest;
   renderElevation(lastResult);
+  renderStationUtilizationDashboard(lastResult);
   renderCrossSection(lastResult);
 }
 

@@ -1252,6 +1252,7 @@ function render(result) {
   renderChecks(result);
   renderZoneSchedule(result);
   renderElevation(result);
+  renderStationUtilizationDashboard(result);
   renderCrossSection(result);
   renderCharts(result);
   renderTable(result);
@@ -1950,33 +1951,70 @@ function buildUtilizationBand(r, left, plotW, L, yTop, bandH, station = null) {
     <text x="${left + 9}" y="${yTop + bandH + 16}" font-size="12" font-weight="800" fill="${selected && !selected.ok ? "#b3261e" : "#26394d"}">${selectedText}</text>
   </g>`;
 }
-function buildShearZones(r, left, plotW, L, yTop, zoneH = 54) {
+function buildStirrupIntervalTicks(x1m, x2m, spacingMm, L, left, plotW, yTop, zoneH, options = {}) {
+  const spacingM = Math.max(0.025, (+spacingMm || 0) / 1000);
+  const xStart = Math.max(0, +x1m || 0);
+  const xEnd = Math.max(xStart, +x2m || xStart);
+  if (xEnd <= xStart + 1e-9 || !Number.isFinite(spacingM)) return "";
+  const y1 = options.y1 ?? (yTop + 10);
+  const y2 = options.y2 ?? (yTop + zoneH - 12);
+  const stroke = options.stroke || "#c5ced8";
+  const width = options.width || 0.9;
+  const dash = options.dash ? ` stroke-dasharray="${options.dash}"` : "";
+  const maxTicks = 220;
+  const ticks = [];
+  let x = xStart;
+  let n = 0;
+  while (x <= xEnd + 1e-9 && n < maxTicks) {
+    const sx = scaleX(Math.min(x, xEnd), L, left, plotW);
+    ticks.push(`<line x1="${sx}" y1="${y1}" x2="${sx}" y2="${y2}" stroke="${stroke}" stroke-width="${width}"${dash}/>`);
+    x += spacingM;
+    n += 1;
+  }
+  if (Math.abs((x - spacingM) - xEnd) > spacingM * 0.25 && n < maxTicks) {
+    const sx = scaleX(xEnd, L, left, plotW);
+    ticks.push(`<line x1="${sx}" y1="${y1}" x2="${sx}" y2="${y2}" stroke="${stroke}" stroke-width="${width}"${dash}/>`);
+  }
+  return ticks.join("");
+}
+
+function buildShearZones(r, left, plotW, L, yTop, zoneH = 64) {
   const schedule = r.summary.zoneSchedule || [];
-  const yMid = yTop + zoneH / 2;
-  const labelY = yTop + 21;
-  const noteY = yTop + 40;
-  const barY = yTop + zoneH - 13;
+  const labelY = yTop + 18;
+  const noteY = yTop + 36;
+  const rangeY = yTop + zoneH - 12;
+  const bandBg = `<rect x="${left}" y="${yTop}" width="${plotW}" height="${zoneH}" rx="10" fill="#f7f9fc" stroke="#d7e0ea"/>`;
+  const axisLine = `<line x1="${left}" y1="${rangeY}" x2="${left + plotW}" y2="${rangeY}" stroke="#d0d9e4" stroke-width="1.1"/>`;
+
   if (schedule.length) {
-    return schedule.map((seg, idx) => {
-      const color = zoneColour(idx);
+    const zoneSvg = schedule.map((seg, idx) => {
       const ranges = seg.ranges || [{ x1: seg.x1, x2: seg.x2 }];
       const labels = zoneLabel(seg);
       return ranges.map((rg, ridx) => {
         const x1 = scaleX(rg.x1, L, left, plotW);
         const x2 = scaleX(rg.x2, L, left, plotW);
         const mid = (x1 + x2) / 2;
-        const minLabelWidth = 120;
+        const minLabelWidth = 132;
         const small = Math.abs(x2 - x1) < minLabelWidth;
-        const tx = small ? Math.min(left + plotW - 5, Math.max(left + 5, mid)) : mid;
-        const anchor = "middle";
-        return `<rect x="${x1}" y="${yTop}" width="${Math.max(1, x2 - x1)}" height="${zoneH}" rx="8" fill="${color}" opacity="0.12" stroke="${color}" stroke-width="1.5"/>
-                <line x1="${x1}" y1="${yTop - 6}" x2="${x1}" y2="${yTop + zoneH + 6}" stroke="${color}" stroke-width="2.2"/>
-                <line x1="${x2}" y1="${yTop - 3}" x2="${x2}" y2="${yTop + zoneH + 3}" stroke="${color}" stroke-width="1.8" opacity="0.85"/>
-                <line x1="${x1}" y1="${barY}" x2="${x2}" y2="${barY}" stroke="${color}" stroke-width="4.2" stroke-linecap="round"/>
-                <text x="${tx}" y="${labelY}" text-anchor="${anchor}" font-size="13.2" font-weight="900" fill="${color}">${labels.primary}</text>
-                <text x="${tx}" y="${noteY}" text-anchor="${anchor}" font-size="12.1" font-weight="800" fill="${color}" opacity="0.9">${labels.dowels}</text>`;
+        const tx = small ? Math.min(left + plotW - 6, Math.max(left + 6, mid)) : mid;
+        const intervalTicks = buildStirrupIntervalTicks(rg.x1, rg.x2, seg.primarySpacing, L, left, plotW, yTop, zoneH);
+        const dowelTicks = seg.dowelSpacing
+          ? buildStirrupIntervalTicks(rg.x1, rg.x2, seg.dowelSpacing, L, left, plotW, yTop, zoneH, { y1: yTop + zoneH - 24, y2: yTop + zoneH - 6, stroke: "#9eb3c7", width: 1.05, dash: "3 3" })
+          : "";
+        const labelPrefix = ranges.length > 1 ? `${seg.name || seg.label || "Zone"} (${ridx + 1})` : (seg.name || seg.label || "Zone");
+        return `<g class="zone-interval-range">
+                <rect x="${x1}" y="${yTop + 4}" width="${Math.max(1, x2 - x1)}" height="${zoneH - 8}" rx="8" fill="#ffffff" opacity="0.62" stroke="#d4dde7" stroke-width="1"/>
+                ${intervalTicks}
+                ${dowelTicks}
+                <line x1="${x1}" y1="${yTop - 4}" x2="${x1}" y2="${yTop + zoneH + 5}" stroke="#6b7d91" stroke-width="1.5"/>
+                <line x1="${x2}" y1="${yTop - 2}" x2="${x2}" y2="${yTop + zoneH + 3}" stroke="#6b7d91" stroke-width="1.2" opacity="0.9"/>
+                <line x1="${x1}" y1="${rangeY}" x2="${x2}" y2="${rangeY}" stroke="#718296" stroke-width="2.2" stroke-linecap="round"/>
+                <text x="${tx}" y="${labelY}" text-anchor="middle" font-size="12.8" font-weight="900" fill="#26394d">${labelPrefix}: ${fmt(seg.primarySpacing,0)} mm stirrups</text>
+                <text x="${tx}" y="${noteY}" text-anchor="middle" font-size="11.5" font-weight="750" fill="#5d6f82">${seg.stirrupLegs}-${seg.stirrupBar}${seg.dowelSpacing ? ` + ${fmt(seg.dowelSpacing,0)} mm dowels` : ""}</text>
+              </g>`;
       }).join("");
     }).join("");
+    return `${bandBg}${axisLine}${zoneSvg}`;
   }
 
   const high = r.summary.highShearThreshold;
@@ -1993,18 +2031,23 @@ function buildShearZones(r, left, plotW, L, yTop, zoneH = 54) {
     }
   }
   zones.push({ start, end: stations[stations.length - 1].x, zone: current });
-  return zones.map((seg, idx) => {
+  const fallback = zones.map((seg) => {
     const x1 = scaleX(seg.start, L, left, plotW);
     const x2 = scaleX(seg.end, L, left, plotW);
-    const color = seg.zone === "A" ? "#b3261e" : "#b26a00";
-    return `<rect x="${x1}" y="${yTop}" width="${Math.max(1, x2 - x1)}" height="${zoneH}" rx="8" fill="${color}" opacity="0.12" stroke="${color}" stroke-width="1.5"/>
-            <line x1="${x1}" y1="${barY}" x2="${x2}" y2="${barY}" stroke="${color}" stroke-width="4.2" stroke-linecap="round"/>
-            <line x1="${x1}" y1="${yTop - 5}" x2="${x1}" y2="${yTop + zoneH + 5}" stroke="${color}" stroke-width="2"/>
-            <text x="${(x1 + x2)/2}" y="${labelY}" text-anchor="middle" font-size="12.2" font-weight="900" fill="${color}">Shear zone ${seg.zone}</text>`;
+    const ticks = buildStirrupIntervalTicks(seg.start, seg.end, r.inputs.stirrupSpacing, L, left, plotW, yTop, zoneH);
+    return `<g class="zone-interval-range">
+            <rect x="${x1}" y="${yTop + 4}" width="${Math.max(1, x2 - x1)}" height="${zoneH - 8}" rx="8" fill="#ffffff" opacity="0.62" stroke="#d4dde7" stroke-width="1"/>
+            ${ticks}
+            <line x1="${x1}" y1="${rangeY}" x2="${x2}" y2="${rangeY}" stroke="#718296" stroke-width="2.2" stroke-linecap="round"/>
+            <line x1="${x1}" y1="${yTop - 3}" x2="${x1}" y2="${yTop + zoneH + 3}" stroke="#6b7d91" stroke-width="1.3"/>
+            <text x="${(x1 + x2)/2}" y="${labelY}" text-anchor="middle" font-size="12.4" font-weight="900" fill="#26394d">Shear zone ${seg.zone}</text>
+          </g>`;
   }).join("");
+  return `${bandBg}${axisLine}${fallback}`;
 }
+
 function renderElevation(r) {
-  const width = 1000, height = 940, left = 86, right = 48;
+  const width = 1000, height = 850, left = 86, right = 48;
   const L = beamLength(r.inputs);
   const plotW = width - left - right;
   const supports = supportLocations(r.inputs);
@@ -2023,7 +2066,7 @@ function renderElevation(r) {
   const supportBaseY = bottomY + 38;
   const dimY = bottomY + 70;
   const zoneTop = dimY + 40;
-  const zoneH = 68;
+  const zoneH = 72;
   const zoneMidY = zoneTop + zoneH / 2;
 
   let arrows = "";
@@ -2070,12 +2113,10 @@ function renderElevation(r) {
             <text x="${mid}" y="${dimY - 5}" text-anchor="middle" font-size="13" font-weight="850" fill="#334e68">${d.label}</text>`;
   }).join("");
 
-  const utilizationTop = zoneTop + zoneH + 44;
-  const utilizationH = 34;
-  const diagramTop = utilizationTop + utilizationH + 70;
-  const diagramH = 108;
-  const diagramGap = 54;
-  const interfaceH = 56;
+  const diagramTop = zoneTop + zoneH + 66;
+  const diagramH = 102;
+  const diagramGap = 48;
+  const interfaceH = 52;
   const miniM = buildMiniDiagram(r, "M", "Mf diagram", "kN·m", diagramTop, left, plotW, diagramH, false, { positiveDown: true, bg: "#f7fbff", station: st });
   const miniV = buildMiniDiagram(r, "V", "Vf diagram", "kN", diagramTop + diagramH + diagramGap, left, plotW, diagramH, false, { bg: "#f7fafc", station: st });
   const interfaceTop = diagramTop + (diagramH + diagramGap) * 2;
@@ -2083,8 +2124,8 @@ function renderElevation(r) {
   const cursorX = st ? scaleX(st.x, L, left, plotW) : left;
   const cursorBottom = interfaceTop + interfaceH + 8;
   const scheduledLocal = st ? scheduledUtilizationAtStation(r, st) : null;
-  const zoneText = scheduledLocal ? `Active: ${scheduledLocal.zoneName} · U=${fmt(scheduledLocal.shearRatio,2)}${scheduledLocal.ok ? "" : " · NG"}` : (local ? `Active: ${local.zone}` : "");
-  const cursorLabel = st ? `x=${fmt(st.x,3)} m · U=${fmt(scheduledLocal?.shearRatio ?? local?.shearRatio ?? 0,2)}` : "";
+  const zoneText = scheduledLocal ? `Active: ${scheduledLocal.zoneName}${scheduledLocal.ok ? "" : " · review"}` : (local ? `Active: ${local.zone}` : "");
+  const cursorLabel = st ? `x=${fmt(st.x,3)} m` : "";
   const cursorLabelX = st ? Math.min(left + plotW - 74, Math.max(left + 74, cursorX)) : left;
   const cursorSvg = st ? `
     <line x1="${cursorX}" y1="${topY - 14}" x2="${cursorX}" y2="${cursorBottom}" stroke="#b3261e" stroke-width="1.8" stroke-dasharray="6 6"/>
@@ -2120,7 +2161,6 @@ function renderElevation(r) {
     <text x="${left}" y="${zoneTop - 12}" font-size="13" font-weight="900" fill="#26394d">Design zones / scheduled reinforcement</text>
     <text x="${left + plotW - 2}" y="${zoneTop - 12}" text-anchor="end" font-size="12" fill="#667587" font-weight="800">${zoneText}</text>
     ${buildShearZones(r, left, plotW, L, zoneTop, zoneH)}
-    ${buildUtilizationBand(r, left, plotW, L, utilizationTop, utilizationH, st)}
     ${miniM}
     ${miniV}
     ${miniInterface}
@@ -2141,6 +2181,7 @@ function renderElevation(r) {
       selectedStationIndex = parseInt(slider.value, 10) || 0;
       if (lastResult) {
         renderElevation(lastResult);
+        renderStationUtilizationDashboard(lastResult);
         renderCrossSection(lastResult);
       }
     });
@@ -2158,6 +2199,75 @@ function zoneForStation(r, station) {
   if (!station || !zones.length) return null;
   return zones.find(z => (z.ranges || [{ x1: z.x1, x2: z.x2 }]).some(rg => station.x >= rg.x1 - 1e-9 && station.x <= rg.x2 + 1e-9)) || zones[zones.length - 1];
 }
+function stationUtilizationValues(r) {
+  const st = activeStation(r);
+  if (!st) return null;
+  const zone = zoneForStation(r, st);
+  const scheduled = scheduledUtilizationAtStation(r, st);
+  const flexMr = st.M >= 0 ? r.summary.flex.pos.Mr : r.summary.flex.neg.Mr;
+  const flexRatio = Math.abs(st.M) / Math.max(1e-9, flexMr);
+  const beamRatio = scheduled ? scheduled.beamRatio : 0;
+  const interfaceRatio = scheduled ? scheduled.interfaceRatio : 0;
+  return {
+    station: st,
+    zone,
+    scheduled,
+    x: st.x,
+    flexRatio,
+    beamRatio,
+    interfaceRatio,
+    mf: Math.abs(st.M),
+    mr: flexMr,
+    vf: Math.abs(st.V),
+    vr: scheduled?.Vr || 0,
+    vi: Math.abs(st.vInterface),
+    vri: scheduled?.interfaceResistance || 0,
+    ok: (flexRatio <= 1.0 + 1e-9) && (scheduled ? scheduled.ok : true)
+  };
+}
+
+function utilStatusClass(value) {
+  if (!Number.isFinite(value)) return "review";
+  if (value > 1.0 + 1e-9) return "ng";
+  if (value >= 0.85) return "warn";
+  return "ok";
+}
+
+function utilMiniCard(label, ratio, detail) {
+  const cls = utilStatusClass(ratio);
+  return `<div class="util-mini-card ${cls}">
+    <div class="util-mini-label">${label}</div>
+    <div class="util-mini-value">${fmt(ratio, 2)}</div>
+    <div class="util-mini-detail">${detail}</div>
+  </div>`;
+}
+
+function renderStationUtilizationDashboard(r) {
+  const el = $("stationUtilizationDashboard");
+  if (!el) return;
+  const u = stationUtilizationValues(r);
+  if (!u) {
+    el.innerHTML = "";
+    return;
+  }
+  const zoneName = u.scheduled?.zoneName || u.zone?.name || u.zone?.label || "Base reinforcement";
+  const governing = Math.max(u.flexRatio, u.beamRatio, u.interfaceRatio);
+  const statusCls = utilStatusClass(governing);
+  el.innerHTML = `<div class="station-utilization-head">
+      <div>
+        <h3>Station utilization</h3>
+        <div class="station-utilization-subtitle">x = ${fmt(u.x, 3)} m · ${zoneName}</div>
+      </div>
+      <div class="station-utilization-chip ${statusCls}">${governing <= 1.0 + 1e-9 ? "OK" : "NG"}</div>
+    </div>
+    <div class="station-utilization-grid">
+      ${utilMiniCard("Mf / Mr", u.flexRatio, `${fmt(u.mf,1)} / ${fmt(u.mr,1)} kN·m`)}
+      ${utilMiniCard("Vf / Vr", u.beamRatio, `${fmt(u.vf,1)} / ${fmt(u.vr,1)} kN`)}
+      ${utilMiniCard("Vinterface / Vr interface", u.interfaceRatio, `${fmt(u.vi,3)} / ${fmt(u.vri,3)} MPa`)}
+    </div>
+    <div class="station-utilization-note">Interface resistance uses only the unused stirrup balance plus dowels, so primary stirrup steel is not double counted when the balance allocation is selected.</div>`;
+}
+
 function renderCrossSection(r) {
   const w = 500, hSvg = 520;
   const x0 = 82, y0 = 82;

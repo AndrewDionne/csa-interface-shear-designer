@@ -1180,10 +1180,120 @@ label[hidden] {
   white-space: nowrap;
 }
 
-/* v19 final elevation layout override */
-.graphics-layout { grid-template-columns: 1fr; align-items: start; }
-.section-wrap { max-width: 560px; justify-self: start; }
-#beamElevation svg { width: 100%; max-height: 880px; }
+/* v21: elevation left with utilization dashboard and section at right */
+.graphics-layout {
+  grid-template-columns: minmax(560px, 1.35fr) minmax(330px, 0.65fr);
+  align-items: start;
+  gap: 18px;
+}
+.graphics-side-panel {
+  display: grid;
+  gap: 12px;
+  align-content: start;
+}
+.section-wrap {
+  max-width: 560px;
+  justify-self: stretch;
+}
+#beamElevation svg {
+  width: 100%;
+  max-height: 780px;
+}
+.station-utilization-dashboard {
+  border: 1px solid #dbe6f1;
+  border-radius: 18px;
+  background: linear-gradient(180deg, #ffffff, #f7fbff);
+  padding: 12px;
+  box-shadow: 0 10px 24px rgba(15, 35, 55, 0.06);
+}
+.station-utilization-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+.station-utilization-head h3 {
+  margin: 0;
+  font-size: 0.98rem;
+  color: #132f4c;
+}
+.station-utilization-subtitle {
+  margin-top: 2px;
+  font-size: 0.78rem;
+  color: #60748a;
+  font-weight: 700;
+}
+.station-utilization-chip {
+  border-radius: 999px;
+  padding: 0.28rem 0.62rem;
+  font-size: 0.74rem;
+  font-weight: 900;
+  border: 1px solid transparent;
+}
+.station-utilization-chip.ok {
+  color: #137333;
+  background: #e7f5ec;
+  border-color: #b9dfc6;
+}
+.station-utilization-chip.warn {
+  color: #9a5b00;
+  background: #fff5dc;
+  border-color: #f2d392;
+}
+.station-utilization-chip.ng {
+  color: #b3261e;
+  background: #fdecea;
+  border-color: #f2b8b5;
+}
+.station-utilization-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 8px;
+}
+.util-mini-card {
+  border: 1px solid #dce6f0;
+  border-left-width: 4px;
+  border-radius: 14px;
+  background: #fff;
+  padding: 9px 10px;
+}
+.util-mini-card.ok { border-left-color: #137333; }
+.util-mini-card.warn { border-left-color: #b26a00; }
+.util-mini-card.ng { border-left-color: #b3261e; }
+.util-mini-label {
+  font-size: 0.73rem;
+  color: #60748a;
+  font-weight: 850;
+}
+.util-mini-value {
+  font-size: 1.38rem;
+  line-height: 1.05;
+  font-weight: 900;
+  color: #17202a;
+  margin-top: 2px;
+}
+.util-mini-detail {
+  margin-top: 2px;
+  font-size: 0.72rem;
+  color: #68798d;
+  font-weight: 700;
+}
+.station-utilization-note {
+  margin-top: 9px;
+  font-size: 0.72rem;
+  color: #667587;
+  line-height: 1.35;
+}
+@media (max-width: 1180px) {
+  .graphics-layout { grid-template-columns: 1fr; }
+  .graphics-side-panel { grid-template-columns: minmax(260px, 0.8fr) minmax(300px, 1fr); align-items: start; }
+  .section-wrap { max-width: none; }
+}
+@media (max-width: 760px) {
+  .graphics-side-panel { grid-template-columns: 1fr; }
+  #beamElevation svg { max-height: none; }
+}
 
 /* v20: separate zone definitions from assignments and keep auto-design options hidden until requested */
 .auto-design-grid {

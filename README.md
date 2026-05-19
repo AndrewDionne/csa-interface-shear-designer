@@ -136,3 +136,10 @@ Still intentionally deferred:
 ## v20 update
 
 See `docs/patch_notes_v20.md` for the zone-definition/assignment editor, span + cantilever overhang system, hidden auto-design controls, and elevation utilization band.
+### v21 graphics cleanup
+
+- Beam elevation is now placed to the left of a side panel containing the selected-station utilization dashboard and cross-section.
+- The selected station dashboard reports `Mf/Mr`, `Vf/Vr`, and `Vinterface/Vr interface`.
+- Zone graphics now use thin light-grey stirrup interval lines instead of red/orange shaded zone fills.
+- Interface utilization remains based on the scheduled detail at the selected station and does not double-count primary stirrup steel when the balance allocation method is selected.
+

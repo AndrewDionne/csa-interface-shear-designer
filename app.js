@@ -53,7 +53,7 @@ const DEFAULTS = {
   dowelLegs: 4,
   dowelSpacing: 350,
   zoneDesignMode: "zoned",
-  zoneDesignStrategy: "primaryFirst",
+  zoneDesignStrategy: "primaryOnly",
   zoneMinSpacing: 100,
   zoneMaxSpacing: 450,
   zoneMaxCount: 5,
@@ -63,8 +63,11 @@ const DEFAULTS = {
 let lastResult = null;
 let selectedStationIndex = 0;
 let scrubDragActive = false;
-let designZones = [];
-let zoneIdCounter = 1;
+let designZones = []; // flattened compatibility view used by the calculation engine
+let zoneDefinitions = [];
+let zoneAssignments = [];
+let zoneDefinitionIdCounter = 1;
+let zoneAssignmentIdCounter = 1;
 
 function $(id) {
   return document.getElementById(id);
@@ -109,7 +112,6 @@ function setupRebarSelects() {
   });
 }
 
-
 function rebarOptions(selected) {
   return REBAR.map(r => `<option value="${r.size}" ${r.size === selected ? "selected" : ""}>${r.size} (${r.area} mm²)</option>`).join("");
 }
@@ -123,13 +125,11 @@ function beamLengthFromCurrentInputs() {
   return beamLength(temp);
 }
 
-function zoneFromBaseInputs(x1 = 0, x2 = null) {
-  const L = beamLengthFromCurrentInputs();
+function baseZoneDefinition() {
   return {
-    id: zoneIdCounter++,
+    id: zoneDefinitions[0]?.id || zoneDefinitionIdCounter++,
     label: "Zone 1",
-    x1,
-    x2: x2 ?? L,
+    isBase: true,
     stirrupBar: val("stirrupBar") || DEFAULTS.stirrupBar,
     stirrupLegs: num("stirrupLegs") || DEFAULTS.stirrupLegs,
     stirrupSpacing: num("stirrupSpacing") || DEFAULTS.stirrupSpacing,
@@ -139,31 +139,94 @@ function zoneFromBaseInputs(x1 = 0, x2 = null) {
   };
 }
 
-function ensureDesignZones() {
+function zoneFromBaseInputs(x1 = 0, x2 = null) {
   const L = beamLengthFromCurrentInputs();
-  if (!designZones.length) {
-    designZones = [zoneFromBaseInputs(0, L)];
+  const def = baseZoneDefinition();
+  return {
+    ...def,
+    assignmentId: zoneAssignments[0]?.id || 1,
+    x1,
+    x2: x2 ?? L
+  };
+}
+
+function normalizeZoneDefinition(def, idx = 0) {
+  const base = baseZoneDefinition();
+  const isBase = idx === 0 || def?.isBase;
+  if (isBase) return { ...base, id: def?.id || base.id, label: "Zone 1", isBase: true };
+  return {
+    id: def?.id || zoneDefinitionIdCounter++,
+    label: def?.label || `Zone ${idx + 1}`,
+    isBase: false,
+    stirrupBar: def?.stirrupBar || val("stirrupBar") || DEFAULTS.stirrupBar,
+    stirrupLegs: Math.max(0, Math.round(+def?.stirrupLegs || 0)),
+    stirrupSpacing: Math.max(25, +def?.stirrupSpacing || DEFAULTS.stirrupSpacing),
+    dowelBar: def?.dowelBar || val("dowelBar") || DEFAULTS.dowelBar,
+    dowelLegs: Math.max(0, Math.round(+def?.dowelLegs || 0)),
+    dowelSpacing: Math.max(25, +def?.dowelSpacing || DEFAULTS.dowelSpacing)
+  };
+}
+
+function ensureZoneModel() {
+  const L = beamLengthFromCurrentInputs();
+  if (!zoneDefinitions.length) zoneDefinitions = [baseZoneDefinition()];
+  zoneDefinitions[0] = normalizeZoneDefinition(zoneDefinitions[0], 0);
+  zoneDefinitions = zoneDefinitions.map((z, idx) => normalizeZoneDefinition(z, idx));
+
+  if (!zoneAssignments.length) {
+    zoneAssignments = [{ id: zoneAssignmentIdCounter++, defId: zoneDefinitions[0].id, x1: 0, x2: L, isBase: true }];
   }
-  designZones[0] = { ...designZones[0], ...zoneFromBaseInputs(0, L), id: designZones[0].id || 1, label: "Zone 1" };
-  designZones = designZones.map((z, idx) => ({
-    ...z,
-    label: idx === 0 ? "Zone 1" : (z.label || `Zone ${idx + 1}`),
-    x1: clamp(Number.isFinite(+z.x1) ? +z.x1 : 0, 0, L),
-    x2: clamp(Number.isFinite(+z.x2) ? +z.x2 : L, 0, L),
-    stirrupBar: z.stirrupBar || val("stirrupBar") || DEFAULTS.stirrupBar,
-    stirrupLegs: Math.max(0, Math.round(+z.stirrupLegs || 0)),
-    stirrupSpacing: Math.max(25, +z.stirrupSpacing || DEFAULTS.stirrupSpacing),
-    dowelBar: z.dowelBar || val("dowelBar") || DEFAULTS.dowelBar,
-    dowelLegs: Math.max(0, Math.round(+z.dowelLegs || 0)),
-    dowelSpacing: Math.max(25, +z.dowelSpacing || DEFAULTS.dowelSpacing)
-  })).map(z => z.x2 < z.x1 ? { ...z, x2: z.x1 } : z);
+  zoneAssignments[0] = {
+    ...(zoneAssignments[0] || {}),
+    id: zoneAssignments[0]?.id || zoneAssignmentIdCounter++,
+    defId: zoneDefinitions[0].id,
+    x1: 0,
+    x2: L,
+    isBase: true
+  };
+  const definitionIds = new Set(zoneDefinitions.map(z => z.id));
+  zoneAssignments = zoneAssignments.map((a, idx) => {
+    const isBase = idx === 0 || a?.isBase;
+    const defId = isBase ? zoneDefinitions[0].id : (definitionIds.has(+a?.defId) ? +a.defId : zoneDefinitions[0].id);
+    const x1 = isBase ? 0 : clamp(Number.isFinite(+a?.x1) ? +a.x1 : 0, 0, L);
+    const x2 = isBase ? L : clamp(Number.isFinite(+a?.x2) ? +a.x2 : L, 0, L);
+    return {
+      id: a?.id || zoneAssignmentIdCounter++,
+      defId,
+      x1: Math.min(x1, x2),
+      x2: Math.max(x1, x2),
+      isBase
+    };
+  });
+
+  designZones = flattenZoneAssignments(L);
+}
+
+function flattenZoneAssignments(L = beamLengthFromCurrentInputs()) {
+  const byId = new Map(zoneDefinitions.map(z => [z.id, z]));
+  return zoneAssignments.map((a, idx) => {
+    const def = byId.get(a.defId) || zoneDefinitions[0] || baseZoneDefinition();
+    return {
+      ...def,
+      id: def.id,
+      assignmentId: a.id,
+      label: def.label || (idx === 0 ? "Zone 1" : `Zone ${idx + 1}`),
+      x1: idx === 0 ? 0 : clamp(+a.x1 || 0, 0, L),
+      x2: idx === 0 ? L : clamp(+a.x2 || 0, 0, L)
+    };
+  }).filter((z, idx) => idx === 0 || z.x2 > z.x1 + 1e-9);
+}
+
+function ensureDesignZones() {
+  ensureZoneModel();
 }
 
 function collectDesignZones(inputs) {
-  ensureDesignZones();
+  ensureZoneModel();
   const L = beamLength(inputs);
-  const base = { ...designZones[0], x1: 0, x2: L, label: "Zone 1" };
-  const extras = inputs.zoneDesignMode === "uniform" ? [] : designZones.slice(1).map((z, idx) => ({
+  const zones = flattenZoneAssignments(L);
+  const base = { ...zones[0], x1: 0, x2: L, label: "Zone 1" };
+  const extras = inputs.zoneDesignMode === "uniform" ? [] : zones.slice(1).map((z, idx) => ({
     ...z,
     label: z.label || `Zone ${idx + 2}`,
     x1: clamp(+z.x1 || 0, 0, L),
@@ -175,66 +238,186 @@ function collectDesignZones(inputs) {
 function renderZoneEditor() {
   const el = $("zoneEditor");
   if (!el) return;
-  ensureDesignZones();
+  ensureZoneModel();
   const L = beamLengthFromCurrentInputs();
-  const rows = designZones.map((z, idx) => {
-    const isBase = idx === 0;
-    return `<div class="zone-card" data-zone-id="${z.id}">
+  const definitionRows = zoneDefinitions.map((z, idx) => {
+    const isBase = idx === 0 || z.isBase;
+    return `<div class="zone-card zone-definition-card" data-zone-definition-id="${z.id}">
       <div class="zone-card-head">
-        <strong>${isBase ? "Zone 1 — base reinforcement" : z.label}</strong>
-        ${isBase ? `<span class="small-muted">Default full-span zone</span>` : `<button class="mini-button zone-delete" type="button" data-zone-id="${z.id}">×</button>`}
+        <strong>${z.label}${isBase ? " — base definition" : ""}</strong>
+        ${isBase ? `<span class="small-muted">Edited in Zone 1 fields above</span>` : `<button class="mini-button zone-definition-delete" type="button" data-zone-definition-id="${z.id}">×</button>`}
       </div>
       <div class="zone-card-grid">
-        <label>x start, m<input class="zone-input" data-zone-id="${z.id}" data-field="x1" type="number" min="0" max="${L}" step="0.05" value="${Number(z.x1 || 0).toFixed(3)}" ${isBase ? "readonly" : ""}></label>
-        <label>x end, m<input class="zone-input" data-zone-id="${z.id}" data-field="x2" type="number" min="0" max="${L}" step="0.05" value="${Number(z.x2 || 0).toFixed(3)}" ${isBase ? "readonly" : ""}></label>
-        ${isBase ? `<div class="zone-inherit-note">Zone 1 reinforcement is edited in the fields above.</div>` : `
-          <label>Primary bar<select class="zone-input" data-zone-id="${z.id}" data-field="stirrupBar">${rebarOptions(z.stirrupBar)}</select></label>
-          <label>Primary legs<input class="zone-input" data-zone-id="${z.id}" data-field="stirrupLegs" type="number" min="0" step="1" value="${Math.round(z.stirrupLegs || 0)}"></label>
-          <label>Primary spacing, mm<input class="zone-input" data-zone-id="${z.id}" data-field="stirrupSpacing" type="number" min="50" step="25" value="${Math.round(z.stirrupSpacing || 0)}"></label>
-          <label>Dowel bar<select class="zone-input" data-zone-id="${z.id}" data-field="dowelBar">${rebarOptions(z.dowelBar)}</select></label>
-          <label>Dowel legs<input class="zone-input" data-zone-id="${z.id}" data-field="dowelLegs" type="number" min="0" step="1" value="${Math.round(z.dowelLegs || 0)}"></label>
-          <label>Dowel spacing, mm<input class="zone-input" data-zone-id="${z.id}" data-field="dowelSpacing" type="number" min="50" step="25" value="${Math.round(z.dowelSpacing || 0)}"></label>`}
+        ${isBase ? `<div class="zone-inherit-note">This definition is the default full-span reinforcement. Edit its bars, legs, and spacing in the Zone 1 fields above.</div>` : `
+          <label>Definition name<input class="zone-input" data-kind="definition" data-zone-definition-id="${z.id}" data-field="label" type="text" value="${z.label}"></label>
+          <label>Primary bar<select class="zone-input" data-kind="definition" data-zone-definition-id="${z.id}" data-field="stirrupBar">${rebarOptions(z.stirrupBar)}</select></label>
+          <label>Primary legs<input class="zone-input" data-kind="definition" data-zone-definition-id="${z.id}" data-field="stirrupLegs" type="number" min="0" step="1" value="${Math.round(z.stirrupLegs || 0)}"></label>
+          <label>Primary spacing, mm<input class="zone-input" data-kind="definition" data-zone-definition-id="${z.id}" data-field="stirrupSpacing" type="number" min="50" step="25" value="${Math.round(z.stirrupSpacing || 0)}"></label>
+          <label>Dowel bar<select class="zone-input" data-kind="definition" data-zone-definition-id="${z.id}" data-field="dowelBar">${rebarOptions(z.dowelBar)}</select></label>
+          <label>Dowel legs<input class="zone-input" data-kind="definition" data-zone-definition-id="${z.id}" data-field="dowelLegs" type="number" min="0" step="1" value="${Math.round(z.dowelLegs || 0)}"></label>
+          <label>Dowel spacing, mm<input class="zone-input" data-kind="definition" data-zone-definition-id="${z.id}" data-field="dowelSpacing" type="number" min="50" step="25" value="${Math.round(z.dowelSpacing || 0)}"></label>`}
       </div>
     </div>`;
   }).join("");
-  el.innerHTML = rows;
+
+  const assignmentRows = zoneAssignments.map((a, idx) => {
+    const isBase = idx === 0 || a.isBase;
+    const defOptions = zoneDefinitions.map(z => `<option value="${z.id}" ${z.id === a.defId ? "selected" : ""}>${z.label}</option>`).join("");
+    return `<div class="zone-card zone-assignment-card" data-zone-assignment-id="${a.id}">
+      <div class="zone-card-head">
+        <strong>${isBase ? "Base assignment — full beam" : `Assignment ${idx}`}</strong>
+        ${isBase ? `<span class="small-muted">Zone 1 fallback everywhere</span>` : `<button class="mini-button zone-assignment-delete" type="button" data-zone-assignment-id="${a.id}">×</button>`}
+      </div>
+      <div class="zone-card-grid">
+        <label>Use zone definition<select class="zone-input" data-kind="assignment" data-zone-assignment-id="${a.id}" data-field="defId" ${isBase ? "disabled" : ""}>${defOptions}</select></label>
+        <label>x start, m<input class="zone-input" data-kind="assignment" data-zone-assignment-id="${a.id}" data-field="x1" type="number" min="0" max="${L}" step="0.05" value="${Number(a.x1 || 0).toFixed(3)}" ${isBase ? "readonly" : ""}></label>
+        <label>x end, m<input class="zone-input" data-kind="assignment" data-zone-assignment-id="${a.id}" data-field="x2" type="number" min="0" max="${L}" step="0.05" value="${Number(a.x2 || 0).toFixed(3)}" ${isBase ? "readonly" : ""}></label>
+      </div>
+    </div>`;
+  }).join("");
+
+  el.innerHTML = `<div class="zone-editor-section">
+      <div class="zone-editor-subhead"><h4>Zone definitions</h4><button class="secondary-button" id="addZoneDefinitionButton" type="button">+ Add definition</button></div>
+      <div class="small-muted zone-editor-help">Define reinforcement once. A definition can then be assigned to multiple non-contiguous x-ranges.</div>
+      ${definitionRows}
+    </div>
+    <div class="zone-editor-section">
+      <div class="zone-editor-subhead"><h4>Zone assignments</h4><button class="secondary-button" id="addZoneAssignmentButton" type="button">+ Add assignment</button></div>
+      <div class="small-muted zone-editor-help">Assignments control where each definition applies. Later assignments override earlier assignments where ranges overlap.</div>
+      ${assignmentRows}
+    </div>`;
+
+  const addDef = $("addZoneDefinitionButton");
+  if (addDef) addDef.addEventListener("click", addZoneDefinition);
+  const addAssign = $("addZoneAssignmentButton");
+  if (addAssign) addAssign.addEventListener("click", addZoneAssignment);
 }
 
-function addUserZone() {
-  ensureDesignZones();
-  const L = beamLengthFromCurrentInputs();
-  const n = designZones.length;
-  const width = Math.max(0.5, Math.min(2.0, L / 4));
-  const start = Math.max(0, Math.min(L - width, n * width));
-  const base = designZones[0] || zoneFromBaseInputs(0, L);
-  designZones.push({
+function addZoneDefinition() {
+  ensureZoneModel();
+  const base = zoneDefinitions[0] || baseZoneDefinition();
+  zoneDefinitions.push({
     ...base,
-    id: zoneIdCounter++,
-    label: `Zone ${designZones.length + 1}`,
-    x1: start,
-    x2: Math.min(L, start + width)
+    id: zoneDefinitionIdCounter++,
+    isBase: false,
+    label: `Zone ${zoneDefinitions.length + 1}`
   });
   renderZoneEditor();
   runCalculations();
 }
 
+function addZoneAssignment() {
+  ensureZoneModel();
+  const L = beamLengthFromCurrentInputs();
+  const n = zoneAssignments.length;
+  const width = Math.max(0.5, Math.min(2.0, L / 4));
+  const start = Math.max(0, Math.min(L - width, n * width));
+  const def = zoneDefinitions[zoneDefinitions.length - 1] || zoneDefinitions[0];
+  zoneAssignments.push({
+    id: zoneAssignmentIdCounter++,
+    defId: def.id,
+    x1: start,
+    x2: Math.min(L, start + width),
+    isBase: false
+  });
+  renderZoneEditor();
+  runCalculations();
+}
+
+function addUserZone() {
+  addZoneAssignment();
+}
+
 function updateZoneFromEvent(el) {
-  const id = parseInt(el.dataset.zoneId, 10);
+  const kind = el.dataset.kind || (el.dataset.zoneAssignmentId ? "assignment" : "definition");
   const field = el.dataset.field;
-  const zone = designZones.find(z => z.id === id);
-  if (!zone || !field) return;
-  if (["x1", "x2", "stirrupLegs", "stirrupSpacing", "dowelLegs", "dowelSpacing"].includes(field)) {
-    zone[field] = parseFloat(el.value) || 0;
+  if (!field) return;
+  if (kind === "assignment") {
+    const id = parseInt(el.dataset.zoneAssignmentId || el.dataset.zoneId, 10);
+    const assignment = zoneAssignments.find(z => z.id === id);
+    if (!assignment || assignment.isBase) return;
+    if (["x1", "x2", "defId"].includes(field)) assignment[field] = parseFloat(el.value) || 0;
   } else {
-    zone[field] = el.value;
+    const id = parseInt(el.dataset.zoneDefinitionId || el.dataset.zoneId, 10);
+    const def = zoneDefinitions.find(z => z.id === id);
+    if (!def || def.isBase) return;
+    if (["stirrupLegs", "stirrupSpacing", "dowelLegs", "dowelSpacing"].includes(field)) {
+      def[field] = parseFloat(el.value) || 0;
+    } else {
+      def[field] = el.value;
+    }
   }
+  ensureZoneModel();
+  runCalculations();
+}
+
+function deleteZoneDefinition(id) {
+  ensureZoneModel();
+  const def = zoneDefinitions.find(z => z.id === id);
+  if (!def || def.isBase) return;
+  zoneDefinitions = zoneDefinitions.filter(z => z.id !== id);
+  zoneAssignments = zoneAssignments.filter((a, idx) => idx === 0 || a.defId !== id);
+  renderZoneEditor();
+  runCalculations();
+}
+
+function deleteZoneAssignment(id) {
+  zoneAssignments = zoneAssignments.filter((z, idx) => idx === 0 || z.id !== id);
+  renderZoneEditor();
   runCalculations();
 }
 
 function deleteZone(id) {
-  designZones = designZones.filter((z, idx) => idx === 0 || z.id !== id);
-  renderZoneEditor();
-  runCalculations();
+  deleteZoneAssignment(id);
+}
+
+function zoneDetailSignature(z) {
+  return [z.stirrupBar, Math.round(z.stirrupLegs || 0), Math.round(z.stirrupSpacing || z.primarySpacing || 0), z.dowelBar, Math.round(z.dowelLegs || 0), Math.round(z.dowelSpacing || 0)].join("|");
+}
+
+function resetZoneModelFromFlattenedZones(zones) {
+  const L = beamLengthFromCurrentInputs();
+  const list = Array.isArray(zones) && zones.length ? zones : [zoneFromBaseInputs(0, L)];
+  const base = list[0];
+  if (base) {
+    if ($("stirrupBar")) $("stirrupBar").value = base.stirrupBar;
+    if ($("stirrupLegs")) $("stirrupLegs").value = base.stirrupLegs;
+    if ($("stirrupSpacing")) $("stirrupSpacing").value = base.stirrupSpacing || base.primarySpacing;
+    if ($("dowelBar")) $("dowelBar").value = base.dowelBar;
+    if ($("dowelLegs")) $("dowelLegs").value = base.dowelLegs;
+    if ($("dowelSpacing")) $("dowelSpacing").value = base.dowelSpacing || DEFAULTS.dowelSpacing;
+  }
+  zoneDefinitions = [];
+  zoneAssignments = [];
+  ensureZoneModel();
+  const bySignature = new Map([[zoneDetailSignature(zoneDefinitions[0]), zoneDefinitions[0].id]]);
+  list.slice(1).forEach((z, idx) => {
+    const sig = zoneDetailSignature(z);
+    let defId = bySignature.get(sig);
+    if (!defId) {
+      defId = zoneDefinitionIdCounter++;
+      zoneDefinitions.push({
+        id: defId,
+        isBase: false,
+        label: z.label || `Zone ${zoneDefinitions.length + 1}`,
+        stirrupBar: z.stirrupBar,
+        stirrupLegs: z.stirrupLegs,
+        stirrupSpacing: z.stirrupSpacing || z.primarySpacing,
+        dowelBar: z.dowelBar,
+        dowelLegs: z.dowelLegs || 0,
+        dowelSpacing: z.dowelSpacing || DEFAULTS.dowelSpacing
+      });
+      bySignature.set(sig, defId);
+    }
+    zoneAssignments.push({
+      id: zoneAssignmentIdCounter++,
+      defId,
+      x1: clamp(+z.x1 || 0, 0, L),
+      x2: clamp(+z.x2 || 0, 0, L),
+      isBase: false
+    });
+  });
+  ensureZoneModel();
 }
 
 function applyDefaults() {
@@ -243,6 +426,10 @@ function applyDefaults() {
   }
   syncInterfaceDefaults();
   designZones = [];
+  zoneDefinitions = [];
+  zoneAssignments = [];
+  zoneDefinitionIdCounter = 1;
+  zoneAssignmentIdCounter = 1;
   ensureDesignZones();
   updateConditionalInputs();
   renderZoneEditor();
@@ -278,7 +465,7 @@ function updateConditionalInputs() {
   const system = val("beamSystem");
   const pointOn = val("includePoint") === "yes";
   const mode = val("zoneDesignMode");
-  setParentLabelHidden("L2", system !== "twoSpan");
+  setParentLabelHidden("L2", system !== "twoSpan" && system !== "spanCantilever");
   setParentLabelHidden("Pf", !pointOn);
   setParentLabelHidden("Px", !pointOn);
   const sectionModel = val("sectionModel");
@@ -299,14 +486,14 @@ function updateConditionalInputs() {
 }
 
 function beamLength(inputs) {
-  if (inputs.beamSystem === "twoSpan") return inputs.L1 + inputs.L2;
+  if (inputs.beamSystem === "twoSpan" || inputs.beamSystem === "spanCantilever") return inputs.L1 + inputs.L2;
   return inputs.L1;
 }
 
 function supportLocations(inputs) {
   if (inputs.beamSystem === "simple") return [0, inputs.L1];
   if (inputs.beamSystem === "twoSpan") return [0, inputs.L1, inputs.L1 + inputs.L2];
-  if (inputs.beamSystem === "cantilever") return [0];
+  if (inputs.beamSystem === "spanCantilever") return [0, inputs.L1];
   return [0, inputs.L1];
 }
 
@@ -405,10 +592,8 @@ function runBeamFE(inputs, section) {
     const idx = xs.findIndex(x => Math.abs(x - sx) < 1e-6);
     if (idx >= 0) fixed.add(2 * idx); // vertical fixed.
   });
-  if (inputs.beamSystem === "cantilever") {
-    const idx = xs.findIndex(x => Math.abs(x) < 1e-6);
-    fixed.add(2 * idx + 1); // fixed rotation at cantilever root.
-  }
+  // A previous pure fixed-end cantilever option has been replaced by a span + cantilever overhang.
+  // The spanCantilever system is supported at x=0 and x=L1 with a free overhang to x=L1+L2.
 
   const free = [];
   for (let i = 0; i < dof; i++) if (!fixed.has(i)) free.push(i);
@@ -1656,21 +1841,20 @@ function buildMiniDiagram(r, key, label, unit, yTop, left, plotW, plotH, absMode
     const raw = absMode ? Math.abs(st[key]) : st[key];
     const sx0 = p.sx(st.x);
     const sy0 = p.sy(raw);
-    const labelX = Math.min(left + plotW - 8, Math.max(left + 8, sx0 + 12));
-    marker = `<circle cx="${sx0}" cy="${sy0}" r="4.2" fill="${stroke}" stroke="#fff" stroke-width="1.5"/>`;
-    dynamicText = `<text x="${left + plotW - 8}" y="${yTop - 10}" text-anchor="end" font-size="11" font-weight="700" fill="#34495e">${fmt(raw, 1)} ${unit}</text>`;
+    marker = `<circle cx="${sx0}" cy="${sy0}" r="5" fill="${stroke}" stroke="#fff" stroke-width="1.8"/>`;
+    dynamicText = `<text x="${left + plotW - 8}" y="${yTop - 14}" text-anchor="end" font-size="12.5" font-weight="800" fill="#26394d">${fmt(raw, 1)} ${unit}</text>`;
   }
   return `
     <g class="mini-demand-diagram">
-      <rect x="${left}" y="${yTop}" width="${plotW}" height="${plotH}" rx="8" fill="${bg}" stroke="#dbe3ec"/>
-      <text x="${left}" y="${yTop - 10}" font-size="12" font-weight="850" fill="#34495e">${label}</text>
+      <rect x="${left}" y="${yTop}" width="${plotW}" height="${plotH}" rx="10" fill="${bg}" stroke="#dbe3ec"/>
+      <text x="${left}" y="${yTop - 14}" font-size="13.5" font-weight="900" fill="#26394d">${label}</text>
       ${dynamicText}
       ${!absMode ? `<line x1="${left}" y1="${p.zeroY}" x2="${left + plotW}" y2="${p.zeroY}" stroke="#c7d1dc" stroke-dasharray="5 5"/>` : `<line x1="${left}" y1="${p.zeroY}" x2="${left + plotW}" y2="${p.zeroY}" stroke="#c7d1dc"/>`}
       <path d="${fillPath}" fill="${fill}" opacity="0.16"/>
-      <path d="${p.path}" fill="none" stroke="${stroke}" stroke-width="2.7"/>
+      <path d="${p.path}" fill="none" stroke="${stroke}" stroke-width="3.1"/>
       ${marker}
-      <text x="${left + 8}" y="${yTop + 17}" font-size="10.5" fill="#667587">${fmt(p.ymax, 1)}</text>
-      <text x="${left + 8}" y="${yTop + plotH - 7}" font-size="10.5" fill="#667587">${fmt(p.ymin, 1)}</text>
+      <text x="${left + 10}" y="${yTop + 19}" font-size="11.5" fill="#667587">${fmt(p.ymax, 1)}</text>
+      <text x="${left + 10}" y="${yTop + plotH - 8}" font-size="11.5" fill="#667587">${fmt(p.ymin, 1)}</text>
     </g>`;
 }
 function buildMiniInterfaceDiagram(r, yTop, left, plotW, plotH, station = null) {
@@ -1685,39 +1869,112 @@ function buildMiniInterfaceDiagram(r, yTop, left, plotW, plotH, station = null) 
     const qNorm = qMax > 0 ? Math.abs(station.qDesign) / qMax : 0;
     const sx0 = p.sx(station.x);
     const sy0 = p.sy(qNorm);
-    marker = `<circle cx="${sx0}" cy="${sy0}" r="4.2" fill="#b26a00" stroke="#fff" stroke-width="1.5"/>`;
-    dynamicText = `<text x="${left + plotW - 8}" y="${yTop - 10}" text-anchor="end" font-size="11" font-weight="700" fill="#34495e">q=${fmt(station.qDesign, 1)} kN/m · v=${fmt(station.vInterface, 3)} MPa</text>`;
+    marker = `<circle cx="${sx0}" cy="${sy0}" r="4.8" fill="#1f6feb" stroke="#fff" stroke-width="1.8"/>`;
+    dynamicText = `<text x="${left + plotW - 8}" y="${yTop - 14}" text-anchor="end" font-size="12.5" font-weight="800" fill="#26394d">q=${fmt(station.qDesign, 1)} kN/m · v=${fmt(station.vInterface, 3)} MPa</text>`;
   }
   return `
     <g class="mini-demand-diagram">
-      <rect x="${left}" y="${yTop}" width="${plotW}" height="${plotH}" rx="8" fill="#fffaf2" stroke="#ead7b5"/>
-      <text x="${left}" y="${yTop - 10}" font-size="12" font-weight="850" fill="#34495e">Interface q / v demand</text>
+      <rect x="${left}" y="${yTop}" width="${plotW}" height="${plotH}" rx="10" fill="#f3f8ff" stroke="#c9dcf5"/>
+      <text x="${left}" y="${yTop - 14}" font-size="13.5" font-weight="900" fill="#26394d">Interface q / v demand</text>
       ${dynamicText}
-      <line x1="${left}" y1="${p.zeroY}" x2="${left + plotW}" y2="${p.zeroY}" stroke="#d9c4a0"/>
-      <path d="${fillPath}" fill="#b26a00" opacity="0.18"/>
-      <path d="${p.path}" fill="none" stroke="#b26a00" stroke-width="2.7"/>
+      <line x1="${left}" y1="${p.zeroY}" x2="${left + plotW}" y2="${p.zeroY}" stroke="#b7c9de"/>
+      <path d="${fillPath}" fill="#1f6feb" opacity="0.17"/>
+      <path d="${p.path}" fill="none" stroke="#1f6feb" stroke-width="3.1"/>
       ${marker}
-      <text x="${left + 8}" y="${yTop + 17}" font-size="10.5" fill="#806000">q: kN/m</text>
-      <text x="${left + plotW - 8}" y="${yTop + 17}" text-anchor="end" font-size="10.5" fill="#806000">v: MPa</text>
-      <text x="${left + 8}" y="${yTop + plotH - 7}" font-size="10.5" fill="#806000">0</text>
-      <text x="${left + plotW - 8}" y="${yTop + plotH - 7}" text-anchor="end" font-size="10.5" fill="#806000">max ${fmt(qMax, 1)} / ${fmt(vMax, 3)}</text>
+      <text x="${left + 10}" y="${yTop + 18}" font-size="11.5" fill="#285a8f">q: kN/m</text>
+      <text x="${left + plotW - 10}" y="${yTop + 18}" text-anchor="end" font-size="11.5" fill="#285a8f">v: MPa</text>
+      <text x="${left + 10}" y="${yTop + plotH - 7}" font-size="11.5" fill="#285a8f">0</text>
+      <text x="${left + plotW - 10}" y="${yTop + plotH - 7}" text-anchor="end" font-size="11.5" fill="#285a8f">max ${fmt(qMax, 1)} / ${fmt(vMax, 3)}</text>
     </g>`;
 }
-function buildShearZones(r, left, plotW, L, y) {
+function zoneColour(idx) {
+  const palette = ["#b3261e", "#b26a00", "#5d3fd3", "#0f766e", "#7a2e83"];
+  return palette[idx % palette.length];
+}
+function zoneLabel(seg) {
+  const primary = `${seg.name}: ${fmt(seg.stirrupLegs,0)}-${seg.stirrupBar} @ ${fmt(seg.primarySpacing,0)} mm`;
+  const dowels = seg.dowelSpacing ? `${fmt(seg.dowelLegs,0)}-${seg.dowelBar} dowels @ ${fmt(seg.dowelSpacing,0)} mm` : "no added dowels";
+  return { primary, dowels };
+}
+function scheduledUtilizationAtStation(r, station) {
+  if (!r || !station) return null;
+  const zone = zoneForStation(r, station);
+  if (!zone) return null;
+  const ev = evaluateDetailAtStation(r, station, zone.primarySpacing, zone.dowelSpacing || null, zone);
+  return { ...ev, zoneName: zone.name || zone.label || "Zone", zone };
+}
+
+function utilizationColour(util) {
+  if (!Number.isFinite(util)) return "#94a3b8";
+  if (util > 1.0 + 1e-9) return "#b3261e";
+  if (util >= 0.85) return "#b26a00";
+  return "#137333";
+}
+
+function buildUtilizationBand(r, left, plotW, L, yTop, bandH, station = null) {
+  const stations = r.stations || [];
+  if (stations.length < 2) return "";
+  const labelY = yTop - 12;
+  const midY = yTop + bandH / 2;
+  const intervals = [];
+  for (let idx = 0; idx < stations.length - 1; idx++) {
+    const a = stations[idx];
+    const b = stations[idx + 1];
+    if (b.x <= a.x + 1e-9) continue;
+    const evA = scheduledUtilizationAtStation(r, a);
+    const evB = scheduledUtilizationAtStation(r, b);
+    const util = Math.max(evA?.shearRatio || 0, evB?.shearRatio || 0);
+    const ok = (evA?.ok !== false) && (evB?.ok !== false) && util <= 1.0 + 1e-9;
+    intervals.push({ x1: a.x, x2: b.x, util, ok, reason: !ok ? (evA?.reason || evB?.reason || "review") : (evA?.reason || "OK") });
+  }
+  const rects = intervals.map(seg => {
+    const x1 = scaleX(seg.x1, L, left, plotW);
+    const x2 = scaleX(seg.x2, L, left, plotW);
+    const color = utilizationColour(seg.util);
+    return `<rect x="${x1}" y="${yTop}" width="${Math.max(1, x2 - x1)}" height="${bandH}" fill="${color}" opacity="${seg.ok ? 0.28 : 0.58}"/>`;
+  }).join("");
+  const failMarkers = intervals.filter(seg => !seg.ok).map(seg => {
+    const x1 = scaleX(seg.x1, L, left, plotW);
+    const x2 = scaleX(seg.x2, L, left, plotW);
+    return `<line x1="${(x1+x2)/2}" y1="${yTop - 4}" x2="${(x1+x2)/2}" y2="${yTop + bandH + 4}" stroke="#b3261e" stroke-width="1.8" stroke-dasharray="4 4"/>`;
+  }).join("");
+  const selected = station ? scheduledUtilizationAtStation(r, station) : null;
+  const selectedText = selected ? `${selected.zoneName}: utilization ${fmt(selected.shearRatio,2)} · ${selected.ok ? "OK" : "NG / " + selected.reason}` : "";
+  return `<g class="scheduled-utilization-band">
+    <text x="${left}" y="${labelY}" font-size="13" font-weight="900" fill="#26394d">Scheduled utilization along beam</text>
+    <text x="${left + plotW - 2}" y="${labelY}" text-anchor="end" font-size="12" font-weight="800" fill="#667587">green &lt;0.85 · amber 0.85–1.0 · red &gt;1.0</text>
+    <rect x="${left}" y="${yTop}" width="${plotW}" height="${bandH}" rx="8" fill="#eef3f8" stroke="#cbd8e6"/>
+    ${rects}
+    ${failMarkers}
+    <line x1="${left}" y1="${midY}" x2="${left + plotW}" y2="${midY}" stroke="#ffffff" stroke-width="1.1" opacity="0.55"/>
+    <text x="${left + 9}" y="${yTop + bandH + 16}" font-size="12" font-weight="800" fill="${selected && !selected.ok ? "#b3261e" : "#26394d"}">${selectedText}</text>
+  </g>`;
+}
+function buildShearZones(r, left, plotW, L, yTop, zoneH = 54) {
   const schedule = r.summary.zoneSchedule || [];
+  const yMid = yTop + zoneH / 2;
+  const labelY = yTop + 21;
+  const noteY = yTop + 40;
+  const barY = yTop + zoneH - 13;
   if (schedule.length) {
     return schedule.map((seg, idx) => {
-      const color = idx % 2 === 0 ? "#b3261e" : "#b26a00";
+      const color = zoneColour(idx);
       const ranges = seg.ranges || [{ x1: seg.x1, x2: seg.x2 }];
+      const labels = zoneLabel(seg);
       return ranges.map((rg, ridx) => {
         const x1 = scaleX(rg.x1, L, left, plotW);
         const x2 = scaleX(rg.x2, L, left, plotW);
         const mid = (x1 + x2) / 2;
-        const label = `${seg.name}: ${fmt(seg.stirrupLegs,0)}-${seg.stirrupBar} @ ${fmt(seg.primarySpacing,0)}${seg.dowelSpacing ? ` + ${fmt(seg.dowelLegs,0)}-${seg.dowelBar}@${fmt(seg.dowelSpacing,0)}` : ""}`;
-        return `<line x1="${x1}" y1="${y}" x2="${x2}" y2="${y}" stroke="${color}" stroke-width="3.2"/>
-                <line x1="${x1}" y1="${y - 12}" x2="${x1}" y2="${y + 12}" stroke="${color}" stroke-width="2"/>
-                <line x1="${x2}" y1="${y - 8}" x2="${x2}" y2="${y + 8}" stroke="${color}" stroke-width="1.5" opacity="0.7"/>
-                <text x="${mid}" y="${y + 21 + (ridx % 2) * 12}" text-anchor="middle" font-size="10.5" fill="${color}">${label}</text>`;
+        const minLabelWidth = 120;
+        const small = Math.abs(x2 - x1) < minLabelWidth;
+        const tx = small ? Math.min(left + plotW - 5, Math.max(left + 5, mid)) : mid;
+        const anchor = "middle";
+        return `<rect x="${x1}" y="${yTop}" width="${Math.max(1, x2 - x1)}" height="${zoneH}" rx="8" fill="${color}" opacity="0.12" stroke="${color}" stroke-width="1.5"/>
+                <line x1="${x1}" y1="${yTop - 6}" x2="${x1}" y2="${yTop + zoneH + 6}" stroke="${color}" stroke-width="2.2"/>
+                <line x1="${x2}" y1="${yTop - 3}" x2="${x2}" y2="${yTop + zoneH + 3}" stroke="${color}" stroke-width="1.8" opacity="0.85"/>
+                <line x1="${x1}" y1="${barY}" x2="${x2}" y2="${barY}" stroke="${color}" stroke-width="4.2" stroke-linecap="round"/>
+                <text x="${tx}" y="${labelY}" text-anchor="${anchor}" font-size="13.2" font-weight="900" fill="${color}">${labels.primary}</text>
+                <text x="${tx}" y="${noteY}" text-anchor="${anchor}" font-size="12.1" font-weight="800" fill="${color}" opacity="0.9">${labels.dowels}</text>`;
       }).join("");
     }).join("");
   }
@@ -1736,17 +1993,18 @@ function buildShearZones(r, left, plotW, L, y) {
     }
   }
   zones.push({ start, end: stations[stations.length - 1].x, zone: current });
-  return zones.map(seg => {
+  return zones.map((seg, idx) => {
     const x1 = scaleX(seg.start, L, left, plotW);
     const x2 = scaleX(seg.end, L, left, plotW);
     const color = seg.zone === "A" ? "#b3261e" : "#b26a00";
-    return `<line x1="${x1}" y1="${y}" x2="${x2}" y2="${y}" stroke="${color}" stroke-width="3"/>
-            <line x1="${x1}" y1="${y - 10}" x2="${x1}" y2="${y + 10}" stroke="${color}" stroke-width="2"/>
-            <text x="${(x1 + x2)/2}" y="${y + 20}" text-anchor="middle" font-size="11" fill="${color}">Shear zone ${seg.zone}</text>`;
+    return `<rect x="${x1}" y="${yTop}" width="${Math.max(1, x2 - x1)}" height="${zoneH}" rx="8" fill="${color}" opacity="0.12" stroke="${color}" stroke-width="1.5"/>
+            <line x1="${x1}" y1="${barY}" x2="${x2}" y2="${barY}" stroke="${color}" stroke-width="4.2" stroke-linecap="round"/>
+            <line x1="${x1}" y1="${yTop - 5}" x2="${x1}" y2="${yTop + zoneH + 5}" stroke="${color}" stroke-width="2"/>
+            <text x="${(x1 + x2)/2}" y="${labelY}" text-anchor="middle" font-size="12.2" font-weight="900" fill="${color}">Shear zone ${seg.zone}</text>`;
   }).join("");
 }
 function renderElevation(r) {
-  const width = 980, height = 660, left = 78, right = 42;
+  const width = 1000, height = 940, left = 86, right = 48;
   const L = beamLength(r.inputs);
   const plotW = width - left - right;
   const supports = supportLocations(r.inputs);
@@ -1756,83 +2014,113 @@ function renderElevation(r) {
   const local = st ? localDesignForStation(r, st) : null;
 
   const pxPerMmAlongSpan = plotW / Math.max(1, L * 1000);
-  const totalBeamH = clamp(r.inputs.h * pxPerMmAlongSpan, 42, 96);
-  const slabH = clamp(r.inputs.slabDepth * pxPerMmAlongSpan, 8, totalBeamH - 12);
-  const webH = Math.max(22, totalBeamH - slabH);
-  const topY = 68;
+  const totalBeamH = clamp(r.inputs.h * pxPerMmAlongSpan, 46, 102);
+  const slabH = clamp(r.inputs.slabDepth * pxPerMmAlongSpan, 10, totalBeamH - 14);
+  const webH = Math.max(24, totalBeamH - slabH);
+  const topY = 104;
   const jointY = topY + slabH;
   const bottomY = topY + totalBeamH;
-  const zoneY = bottomY + 38;
-  const sliderTopY = zoneY + 6;
+  const supportBaseY = bottomY + 38;
+  const dimY = bottomY + 70;
+  const zoneTop = dimY + 40;
+  const zoneH = 68;
+  const zoneMidY = zoneTop + zoneH / 2;
 
   let arrows = "";
-  const wLabel = r.inputs.Wf !== 0 ? `<text x="${left + 3}" y="${topY - 22}" font-size="10.5" fill="#1f6feb">Wf=${fmt(r.inputs.Wf,1)} kN/m</text>` : "";
+  const wLabel = r.inputs.Wf !== 0 ? `<text x="${left + 3}" y="${topY - 39}" font-size="12.5" font-weight="800" fill="#1f6feb">Wf=${fmt(r.inputs.Wf,1)} kN/m</text>` : "";
   const nArrows = 14;
   if (r.inputs.Wf !== 0) {
     for (let i = 0; i <= nArrows; i++) {
       const x = left + plotW * i / nArrows;
-      arrows += `<line x1="${x}" y1="24" x2="${x}" y2="${topY - 6}" stroke="#1f6feb" stroke-width="2" marker-end="url(#arrowBlue)"/>`;
+      arrows += `<line x1="${x}" y1="54" x2="${x}" y2="${topY - 8}" stroke="#1f6feb" stroke-width="2.3" marker-end="url(#arrowBlue)"/>`;
     }
   }
 
   const supportSvg = supports.map((sx, i) => {
     const x = scaleX(sx, L, left, plotW);
-    if (r.inputs.beamSystem === "cantilever" && i === 0) {
+    if (false && r.inputs.beamSystem === "cantilever" && i === 0) {
       return `<rect x="${x - 12}" y="${topY - 18}" width="24" height="${totalBeamH + 42}" fill="#d9e2ec" stroke="#334e68"/>
               ${Array.from({ length: 7 }, (_, j) => `<line x1="${x - 18}" y1="${topY - 12 + j*14}" x2="${x - 36}" y2="${topY - 2 + j*14}" stroke="#8091a5"/>`).join("")}`;
     }
-    return `<polygon points="${x},${bottomY + 4} ${x - 18},${bottomY + 34} ${x + 18},${bottomY + 34}" fill="#d9e2ec" stroke="#334e68"/>
-            <line x1="${x - 28}" y1="${bottomY + 34}" x2="${x + 28}" y2="${bottomY + 34}" stroke="#334e68"/>`;
+    return `<polygon points="${x},${bottomY + 5} ${x - 19},${supportBaseY} ${x + 19},${supportBaseY}" fill="#d9e2ec" stroke="#334e68"/>
+            <line x1="${x - 30}" y1="${supportBaseY}" x2="${x + 30}" y2="${supportBaseY}" stroke="#334e68"/>`;
   }).join("");
 
   const pointSvg = includeP ? (() => {
     const x = scaleX(xP, L, left, plotW);
-    return `<line x1="${x}" y1="14" x2="${x}" y2="${topY - 9}" stroke="#b3261e" stroke-width="4" marker-end="url(#arrowRed)"/>
-            <text x="${x + 8}" y="24" fill="#b3261e" font-size="12" font-weight="800">Pf=${fmt(r.inputs.Pf, 0)} kN @ x=${fmt(xP, 2)} m</text>`;
+    return `<line x1="${x}" y1="44" x2="${x}" y2="${topY - 10}" stroke="#b3261e" stroke-width="4" marker-end="url(#arrowRed)"/>
+            <text x="${x + 9}" y="48" fill="#b3261e" font-size="13" font-weight="900">Pf=${fmt(r.inputs.Pf, 0)} kN @ x=${fmt(xP, 2)} m</text>`;
   })() : "";
 
-  const spanLabels = r.inputs.beamSystem === "twoSpan"
-    ? `<text x="${scaleX(r.inputs.L1/2, L, left, plotW)}" y="${bottomY + 67}" text-anchor="middle" font-size="12">L1=${fmt(r.inputs.L1,2)} m</text>
-       <text x="${scaleX(r.inputs.L1 + r.inputs.L2/2, L, left, plotW)}" y="${bottomY + 67}" text-anchor="middle" font-size="12">L2=${fmt(r.inputs.L2,2)} m</text>`
-    : `<text x="${left + plotW/2}" y="${bottomY + 67}" text-anchor="middle" font-size="12">L=${fmt(r.inputs.L1,2)} m</text>`;
+  const dimArrowLeft = `<marker id="dimArrowLeft" markerWidth="9" markerHeight="9" refX="4" refY="4" orient="auto"><path d="M8,0 L0,4 L8,8" fill="none" stroke="#60748a" stroke-width="1.6"/></marker>`;
+  const dimArrowRight = `<marker id="dimArrowRight" markerWidth="9" markerHeight="9" refX="4" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8" fill="none" stroke="#60748a" stroke-width="1.6"/></marker>`;
+  const spanDims = r.inputs.beamSystem === "twoSpan"
+    ? [{ x1: 0, x2: r.inputs.L1, label: `L1 = ${fmt(r.inputs.L1,2)} m` }, { x1: r.inputs.L1, x2: L, label: `L2 = ${fmt(r.inputs.L2,2)} m` }]
+    : r.inputs.beamSystem === "spanCantilever"
+      ? [{ x1: 0, x2: r.inputs.L1, label: `span = ${fmt(r.inputs.L1,2)} m` }, { x1: r.inputs.L1, x2: L, label: `cantilever = ${fmt(r.inputs.L2,2)} m` }]
+      : [{ x1: 0, x2: L, label: `L = ${fmt(r.inputs.L1,2)} m` }];
+  const spanLabels = spanDims.map(d => {
+    const x1 = scaleX(d.x1, L, left, plotW);
+    const x2 = scaleX(d.x2, L, left, plotW);
+    const mid = (x1 + x2) / 2;
+    return `<line x1="${x1}" y1="${dimY}" x2="${x2}" y2="${dimY}" stroke="#60748a" stroke-width="1.4" marker-start="url(#dimArrowLeft)" marker-end="url(#dimArrowRight)"/>
+            <line x1="${x1}" y1="${dimY - 10}" x2="${x1}" y2="${dimY + 10}" stroke="#8091a5"/>
+            <line x1="${x2}" y1="${dimY - 10}" x2="${x2}" y2="${dimY + 10}" stroke="#8091a5"/>
+            <rect x="${mid - 48}" y="${dimY - 18}" width="96" height="17" rx="8" fill="#ffffff" opacity="0.92"/>
+            <text x="${mid}" y="${dimY - 5}" text-anchor="middle" font-size="13" font-weight="850" fill="#334e68">${d.label}</text>`;
+  }).join("");
 
-  const diagramTop = Math.max(270, sliderTopY + 34);
-  const miniM = buildMiniDiagram(r, "M", "Mf diagram", "kN·m", diagramTop, left, plotW, 105, false, { positiveDown: true, bg: "#f7fbff", station: st });
-  const miniV = buildMiniDiagram(r, "V", "Vf diagram", "kN", diagramTop + 132, left, plotW, 105, false, { bg: "#f7fafc", station: st });
-  const miniInterface = buildMiniInterfaceDiagram(r, diagramTop + 264, left, plotW, 112, st);
+  const utilizationTop = zoneTop + zoneH + 44;
+  const utilizationH = 34;
+  const diagramTop = utilizationTop + utilizationH + 70;
+  const diagramH = 108;
+  const diagramGap = 54;
+  const interfaceH = 56;
+  const miniM = buildMiniDiagram(r, "M", "Mf diagram", "kN·m", diagramTop, left, plotW, diagramH, false, { positiveDown: true, bg: "#f7fbff", station: st });
+  const miniV = buildMiniDiagram(r, "V", "Vf diagram", "kN", diagramTop + diagramH + diagramGap, left, plotW, diagramH, false, { bg: "#f7fafc", station: st });
+  const interfaceTop = diagramTop + (diagramH + diagramGap) * 2;
+  const miniInterface = buildMiniInterfaceDiagram(r, interfaceTop, left, plotW, interfaceH, st);
   const cursorX = st ? scaleX(st.x, L, left, plotW) : left;
-  const cursorBottom = diagramTop + 264 + 112;
-  const zoneText = local ? `Shear zone ${local.zone}` : "";
+  const cursorBottom = interfaceTop + interfaceH + 8;
+  const scheduledLocal = st ? scheduledUtilizationAtStation(r, st) : null;
+  const zoneText = scheduledLocal ? `Active: ${scheduledLocal.zoneName} · U=${fmt(scheduledLocal.shearRatio,2)}${scheduledLocal.ok ? "" : " · NG"}` : (local ? `Active: ${local.zone}` : "");
+  const cursorLabel = st ? `x=${fmt(st.x,3)} m · U=${fmt(scheduledLocal?.shearRatio ?? local?.shearRatio ?? 0,2)}` : "";
+  const cursorLabelX = st ? Math.min(left + plotW - 74, Math.max(left + 74, cursorX)) : left;
   const cursorSvg = st ? `
-    <line x1="${cursorX}" y1="${topY - 10}" x2="${cursorX}" y2="${cursorBottom}" stroke="#b3261e" stroke-width="1.5" stroke-dasharray="5 5"/>
-    <circle cx="${cursorX}" cy="${jointY}" r="4" fill="#b3261e"/>
-    <text x="${Math.min(width - 8, Math.max(8, cursorX))}" y="${zoneY - 14}" text-anchor="middle" font-size="10.5" fill="#b3261e" font-weight="700">x=${fmt(st.x,3)} m</text>
+    <line x1="${cursorX}" y1="${topY - 14}" x2="${cursorX}" y2="${cursorBottom}" stroke="#b3261e" stroke-width="1.8" stroke-dasharray="6 6"/>
+    <circle cx="${cursorX}" cy="${jointY}" r="4.6" fill="#b3261e" stroke="#fff" stroke-width="1.2"/>
+    <circle cx="${cursorX}" cy="${zoneMidY}" r="4.3" fill="#b3261e" stroke="#fff" stroke-width="1.1"/>
+    <rect x="${cursorLabelX - 74}" y="${zoneTop + zoneH + 14}" width="148" height="19" rx="9" fill="#fff" stroke="#f0b7b2" opacity="0.96"/>
+    <text x="${cursorLabelX}" y="${zoneTop + zoneH + 28}" text-anchor="middle" font-size="12.2" fill="#b3261e" font-weight="900">${cursorLabel}</text>
   ` : "";
 
+  const sliderTop = topY - 18;
+  const sliderHeight = cursorBottom - sliderTop;
   const svg = `<svg viewBox="0 0 ${width} ${height}" role="img" aria-label="Beam elevation with aligned demand diagrams">
     <defs>
       <marker id="arrowBlue" markerWidth="8" markerHeight="8" refX="4" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 Z" fill="#1f6feb"/></marker>
       <marker id="arrowRed" markerWidth="8" markerHeight="8" refX="4" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 Z" fill="#b3261e"/></marker>
+      ${dimArrowLeft}
+      ${dimArrowRight}
     </defs>
-    <text x="${left}" y="18" font-size="14" font-weight="800">Elevation: ${labelBeamSystem(r.inputs.beamSystem)}</text>
+    <text x="${left}" y="24" font-size="16" font-weight="900" fill="#17202a">Elevation: ${labelBeamSystem(r.inputs.beamSystem)}</text>
     ${wLabel}
     ${arrows}
     ${pointSvg}
-    <rect x="${left}" y="${topY}" width="${plotW}" height="${slabH}" rx="4" fill="#dce9f8" stroke="#5f6f82"/>
-    <rect x="${left}" y="${jointY}" width="${plotW}" height="${webH}" rx="4" fill="#e8edf3" stroke="#5f6f82"/>
-    <line x1="${left}" y1="${jointY}" x2="${left + plotW}" y2="${jointY}" stroke="#b26a00" stroke-width="2.2" stroke-dasharray="7 6"/>
-    <text x="${left + 8}" y="${jointY - 6}" font-size="11" fill="#6b4600" font-weight="700">cold joint / roughened interface</text>
+    <rect x="${left}" y="${topY}" width="${plotW}" height="${slabH}" rx="5" fill="#dce9f8" stroke="#5f6f82"/>
+    <rect x="${left}" y="${jointY}" width="${plotW}" height="${webH}" rx="5" fill="#e8edf3" stroke="#5f6f82"/>
+    <line x1="${left}" y1="${jointY}" x2="${left + plotW}" y2="${jointY}" stroke="#b26a00" stroke-width="2.5" stroke-dasharray="7 6"/>
+    <text x="${left + 10}" y="${jointY - 7}" font-size="12.2" fill="#6b4600" font-weight="850">cold joint / roughened interface</text>
     ${supportSvg}
-    <line x1="${left - 24}" y1="${topY}" x2="${left - 24}" y2="${bottomY}" stroke="#8091a5"/>
-    <line x1="${left - 38}" y1="${topY}" x2="${left - 22}" y2="${topY}" stroke="#8091a5"/>
-    <line x1="${left - 38}" y1="${bottomY}" x2="${left - 22}" y2="${bottomY}" stroke="#8091a5"/>
-    <text x="${left - 45}" y="${topY + totalBeamH/2}" transform="rotate(-90 ${left - 45} ${topY + totalBeamH/2})" font-size="12" text-anchor="middle">h=${fmt(r.inputs.h,0)} mm</text>
-    <line x1="${left}" y1="${bottomY + 52}" x2="${left + plotW}" y2="${bottomY + 52}" stroke="#8091a5"/>
-    <line x1="${left}" y1="${bottomY + 45}" x2="${left}" y2="${bottomY + 59}" stroke="#8091a5"/>
-    <line x1="${left + plotW}" y1="${bottomY + 45}" x2="${left + plotW}" y2="${bottomY + 59}" stroke="#8091a5"/>
+    <line x1="${left - 26}" y1="${topY}" x2="${left - 26}" y2="${bottomY}" stroke="#8091a5"/>
+    <line x1="${left - 40}" y1="${topY}" x2="${left - 24}" y2="${topY}" stroke="#8091a5"/>
+    <line x1="${left - 40}" y1="${bottomY}" x2="${left - 24}" y2="${bottomY}" stroke="#8091a5"/>
+    <text x="${left - 48}" y="${topY + totalBeamH/2}" transform="rotate(-90 ${left - 48} ${topY + totalBeamH/2})" font-size="12.5" font-weight="800" text-anchor="middle" fill="#334e68">h=${fmt(r.inputs.h,0)} mm</text>
     ${spanLabels}
-    ${buildShearZones(r, left, plotW, L, zoneY)}
-    <text x="${left + plotW - 2}" y="${zoneY - 12}" text-anchor="end" font-size="11" fill="#667587">${zoneText}</text>
+    <text x="${left}" y="${zoneTop - 12}" font-size="13" font-weight="900" fill="#26394d">Design zones / scheduled reinforcement</text>
+    <text x="${left + plotW - 2}" y="${zoneTop - 12}" text-anchor="end" font-size="12" fill="#667587" font-weight="800">${zoneText}</text>
+    ${buildShearZones(r, left, plotW, L, zoneTop, zoneH)}
+    ${buildUtilizationBand(r, left, plotW, L, utilizationTop, utilizationH, st)}
     ${miniM}
     ${miniV}
     ${miniInterface}
@@ -1842,7 +2130,7 @@ function renderElevation(r) {
   $("beamElevation").innerHTML = `
     <div class="beam-elev-wrap">
       ${svg}
-      <div class="beam-slider-overlay" style="left:${(left / width * 100).toFixed(3)}%; width:${(plotW / width * 100).toFixed(3)}%; top:${(sliderTopY / height * 100).toFixed(3)}%;">
+      <div class="beam-slider-overlay" style="left:${(left / width * 100).toFixed(3)}%; width:${(plotW / width * 100).toFixed(3)}%; top:${(sliderTop / height * 100).toFixed(3)}%; height:${(sliderHeight / height * 100).toFixed(3)}%;">
         <input id="stationSlider" type="range" min="0" max="${r.stations.length - 1}" step="1" value="${selectedStationIndex}" aria-label="Station along beam" />
       </div>
     </div>`;
@@ -1861,7 +2149,7 @@ function renderElevation(r) {
 function labelBeamSystem(system) {
   if (system === "simple") return "single-span simply supported";
   if (system === "twoSpan") return "two-span continuous";
-  if (system === "cantilever") return "cantilever";
+  if (system === "spanCantilever") return "span + cantilever overhang";
   return system;
 }
 
@@ -1876,6 +2164,7 @@ function renderCrossSection(r) {
   const maxW = 345, maxH = 278;
   const st = activeStation(r);
   const local = st ? localDesignForStation(r, st) : null;
+  const scheduledLocal = st ? scheduledUtilizationAtStation(r, st) : null;
   const zone = st ? zoneForStation(r, st) : null;
   const zonePrimarySpacing = zone ? zone.primarySpacing : r.inputs.stirrupSpacing;
   const zoneDowelSpacing = zone && zone.dowelSpacing ? zone.dowelSpacing : r.inputs.dowelSpacing;
@@ -1934,7 +2223,7 @@ function renderCrossSection(r) {
   }
 
   const noteY = y0 + secH + 40;
-  const stationTitle = st ? `Station x=${fmt(st.x,3)} m · Shear zone ${local.zone}` : "Selected section";
+  const stationTitle = st ? `Station x=${fmt(st.x,3)} m · ${scheduledLocal?.zoneName || `Shear zone ${local.zone}`} · U=${fmt(scheduledLocal?.shearRatio ?? local.shearRatio,2)}` : "Selected section";
   const localLine = local ? `Local req: beam Av=${fmt(local.beamAvReqPerM,0)} mm²/m · interface Av=${fmt(local.interfaceAvReqPerM,0)} mm²/m · add=${fmt(local.addReq,0)} mm²/m` : "";
   $("crossSection").innerHTML = `<svg viewBox="0 0 ${w} ${hSvg}" role="img" aria-label="Cross-section reinforcement drawn to scale">
     <text x="${x0}" y="24" font-size="17" font-weight="850">Cross-section</text>
@@ -2600,7 +2889,7 @@ function buildAutoZones(sim, concept) {
   };
   if (concept === "uniform") {
     const gov = governingDesignForRange(sim, 0, L);
-    return [{ ...base, id: zoneIdCounter++, label: "Zone 1", x1: 0, x2: L, stirrupSpacing: gov.primarySpacing, dowelLegs: gov.dowelSpacing ? (base.dowelLegs || sim.inputs.dowelLegs || 4) : 0, dowelSpacing: gov.dowelSpacing || base.dowelSpacing }];
+    return [{ ...base, id: zoneDefinitionIdCounter++, label: "Zone 1", x1: 0, x2: L, stirrupSpacing: gov.primarySpacing, dowelLegs: gov.dowelSpacing ? (base.dowelLegs || sim.inputs.dowelLegs || 4) : 0, dowelSpacing: gov.dowelSpacing || base.dowelSpacing }];
   }
 
   const reqs = sim.stations.map(st => ({ station: st, req: stationDesignRequirement(sim, st) }));
@@ -2645,7 +2934,7 @@ function buildAutoZones(sim, concept) {
   }
   const zones = pieces.map((p, idx) => ({
     ...base,
-    id: zoneIdCounter++,
+    id: zoneDefinitionIdCounter++,
     label: `Zone ${idx + 1}`,
     x1: p.x1,
     x2: p.x2,
@@ -2654,16 +2943,16 @@ function buildAutoZones(sim, concept) {
     dowelSpacing: p.req.dowelSpacing || base.dowelSpacing
   }));
   if (zones.length) zones[0].label = "Zone 1";
-  return zones.length ? zones : [{ ...base, id: zoneIdCounter++, label: "Zone 1", x1: 0, x2: L }];
+  return zones.length ? zones : [{ ...base, id: zoneDefinitionIdCounter++, label: "Zone 1", x1: 0, x2: L }];
 }
 
 function previewAutoDesign(apply = false) {
   if (!lastResult) runCalculations();
   const r = lastResult;
-  const concept = $("autoZoneCount") ? val("autoZoneCount") : "zoned";
-  const strategy = $("autoStrategy") ? val("autoStrategy") : "primaryOnly";
-  const maxPractical = Math.max(75, num("autoMaxSpacing") || r.inputs.zoneMaxSpacing || 450);
-  const zoneStrategy = strategy === "addDowels" ? "addDowels" : strategy === "primaryOnly" ? "primaryOnly" : "hybrid";
+  const concept = $("zoneDesignMode") ? val("zoneDesignMode") : "zoned";
+  const strategy = $("zoneDesignStrategy") ? val("zoneDesignStrategy") : "primaryOnly";
+  const maxPractical = Math.max(75, num("zoneMaxSpacing") || r.inputs.zoneMaxSpacing || 450);
+  const zoneStrategy = strategy === "addDowels" ? "addDowels" : strategy === "primaryOnly" || strategy === "primaryFirst" ? "primaryOnly" : "hybrid";
 
   const sim = {
     ...r,
@@ -2697,20 +2986,11 @@ function previewAutoDesign(apply = false) {
     $("zoneDesignMode").value = sim.inputs.zoneDesignMode;
     $("zoneDesignStrategy").value = sim.inputs.zoneDesignStrategy;
     $("zoneMaxSpacing").value = maxPractical;
-    designZones = proposedZones.map((z, idx) => ({ ...z, id: z.id || zoneIdCounter++, label: idx === 0 ? "Zone 1" : `Zone ${idx + 1}` }));
-    const z1 = designZones[0];
-    if (z1) {
-      $("stirrupBar").value = z1.stirrupBar;
-      $("stirrupLegs").value = z1.stirrupLegs;
-      $("stirrupSpacing").value = z1.stirrupSpacing;
-      $("dowelBar").value = z1.dowelBar;
-      $("dowelLegs").value = z1.dowelLegs;
-      $("dowelSpacing").value = z1.dowelSpacing;
-    }
+    resetZoneModelFromFlattenedZones(proposedZones.map((z, idx) => ({ ...z, label: idx === 0 ? "Zone 1" : (z.label || `Zone ${idx + 1}`) })));
     updateConditionalInputs();
     renderZoneEditor();
     runCalculations();
-    if ($("autoDesignResult")) $("autoDesignResult").textContent = "Applied: " + message;
+    if ($("autoDesignResult")) $("autoDesignResult").textContent = "Designed: " + message;
   }
 }
 function setStationFromClientX(clientX) {
@@ -2719,8 +2999,8 @@ function setStationFromClientX(clientX) {
   const svg = host ? host.querySelector("svg") : null;
   if (!svg) return;
   const rect = svg.getBoundingClientRect();
-  const leftPct = 78 / 980;
-  const plotPct = 860 / 980;
+  const leftPct = 86 / 1000;
+  const plotPct = 866 / 1000;
   const ratio = clamp(((clientX - rect.left) / Math.max(1, rect.width) - leftPct) / plotPct, 0, 1);
   const targetX = ratio * beamLength(lastResult.inputs);
   let closest = 0;
@@ -2776,9 +3056,10 @@ function attachEvents() {
     });
     $("zoneEditor").addEventListener("change", event => {
       if (event.target.classList.contains("zone-input")) updateZoneFromEvent(event.target);
-      if (event.target.classList.contains("zone-delete")) deleteZone(parseInt(event.target.dataset.zoneId, 10));
     });
     $("zoneEditor").addEventListener("click", event => {
+      if (event.target.classList.contains("zone-assignment-delete")) deleteZoneAssignment(parseInt(event.target.dataset.zoneAssignmentId, 10));
+      if (event.target.classList.contains("zone-definition-delete")) deleteZoneDefinition(parseInt(event.target.dataset.zoneDefinitionId, 10));
       if (event.target.classList.contains("zone-delete")) deleteZone(parseInt(event.target.dataset.zoneId, 10));
     });
   }

@@ -32,7 +32,7 @@
             <select id="beamSystem">
               <option value="simple">Single-span simply supported</option>
               <option value="twoSpan">Two-span continuous</option>
-              <option value="cantilever">Cantilever</option>
+              <option value="spanCantilever">Span + cantilever overhang</option>
             </select>
           </label>
           <label>Station count
@@ -41,7 +41,7 @@
           <label>Span L1, m
             <input id="L1" type="number" step="0.1" value="16" />
           </label>
-          <label>Span L2, m
+          <label>Span L2 / cantilever overhang, m
             <input id="L2" type="number" step="0.1" value="16" />
           </label>
           <label>Factored UDL Wf, kN/m
@@ -185,7 +185,7 @@
 
       <details open>
         <summary>Design reinforcement zones</summary>
-        <p class="input-help">Zone 1 is the base reinforcement and applies to the full beam unless additional zones are added. Added zones override Zone 1 over their specified x-ranges.</p>
+        <p class="input-help">Zone 1 is the base full-beam reinforcement. Create reusable zone definitions, then assign each definition to one or more x-ranges; later assignments override earlier ones where ranges overlap.</p>
         <div class="grid two zone-one-grid">
           <label>Zone 1 primary stirrup bar
             <select id="stirrupBar"></select>
@@ -207,16 +207,22 @@
           </label>
         </div>
         <div class="zone-editor-head">
-          <h3>Editable zone ranges</h3>
-          <button class="secondary-button" id="addZoneButton" type="button">+ Add zone</button>
+          <h3>Zone definitions + assignments</h3>
         </div>
         <div id="zoneEditor" class="zone-editor"></div>
       </details>
 
+      <div class="button-row">
+        <button class="primary-button" id="runButton">Run analysis + design check</button>
+        <button class="secondary-button" id="autoDesignButton" type="button">Auto design</button>
+      </div>
 
-      <details open>
-        <summary>Shear zone design</summary>
-        <div class="grid two">
+      <div class="auto-design-panel" id="autoDesignPanel" hidden>
+        <div class="auto-design-head">
+          <h3>Auto design shear zones</h3>
+          <button class="mini-button" id="closeAutoDesign" type="button">×</button>
+        </div>
+        <div class="grid two auto-design-grid">
           <label>Zone design mode
             <select id="zoneDesignMode">
               <option value="zoned" selected>Zoned by demand envelope</option>
@@ -225,7 +231,7 @@
           </label>
           <label>Zone design strategy
             <select id="zoneDesignStrategy">
-              <option value="primaryFirst" selected>Tighten primary stirrups first</option>
+              <option value="primaryOnly" selected>Tighten primary stirrups first</option>
               <option value="addDowels">Keep primary spacing + add dowels</option>
               <option value="hybrid">Hybrid: tighten primary, then add dowels</option>
             </select>
@@ -243,39 +249,11 @@
             <input id="zoneMinLength" type="number" min="0" step="0.25" value="0" />
           </label>
         </div>
-      </details>
-
-      <div class="button-row">
-        <button class="primary-button" id="runButton">Run analysis + design check</button>
-        <button class="secondary-button" id="autoDesignButton" type="button">Auto design</button>
-      </div>
-
-      <div class="auto-design-panel" id="autoDesignPanel" hidden>
-        <div class="auto-design-head">
-          <h3>Auto design options</h3>
-          <button class="mini-button" id="closeAutoDesign" type="button">×</button>
-        </div>
-        <label>Shear-zone concept
-          <select id="autoZoneCount">
-            <option value="uniform">Uniform</option>
-            <option value="zoned" selected>Zoned</option>
-          </select>
-        </label>
-        <label>Design strategy
-          <select id="autoStrategy">
-            <option value="primaryOnly" selected>Use primary stirrups first</option>
-            <option value="addDowels">Keep primary spacing + add dowels</option>
-            <option value="hybrid">Tighten primary + add dowels if needed</option>
-          </select>
-        </label>
-        <label>Maximum practical spacing, mm
-          <input id="autoMaxSpacing" type="number" step="25" value="450" />
-        </label>
         <div class="auto-design-actions">
-          <button class="primary-button" id="applyAutoDesign" type="button">Apply auto design</button>
+          <button class="primary-button" id="applyAutoDesign" type="button">Design shear zones</button>
           <button class="ghost-button" id="previewAutoDesign" type="button">Preview only</button>
         </div>
-        <div class="auto-design-result" id="autoDesignResult">Choose a strategy, then preview or apply.</div>
+        <div class="auto-design-result" id="autoDesignResult">Choose options, then preview or design shear zones.</div>
       </div>
     </section>
 

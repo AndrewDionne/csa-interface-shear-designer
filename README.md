@@ -116,9 +116,23 @@ Additional changes in this patch:
 - Corrected the high-shear spacing threshold to use `0.125 λϕc f′c bw dv`, not `sqrt(f′c)`.
 - Added interface presets for monolithic concrete and concrete anchored to as-rolled structural steel from Clause 11.5.2.
 
+
+Additional elevation/diagram cleanup in v19:
+
+- Increased elevation canvas spacing and text sizes.
+- Added a clearer span dimension below the elevation.
+- Replaced the visible blue slider thumb/track with an invisible slider; the red dashed station cursor is now the visible slider.
+- Reworked design zones as semi-transparent bands with boundary ticks and larger reinforcement labels.
+- Changed the interface shear demand diagram to blue and reduced its height to a compact strip.
+
 Still intentionally deferred:
 
 - Full CSA A23.3-24 edition selector and full-standard clause lock-in beyond the uploaded shear excerpt.
 - Normal force, inclined interface reinforcement, headed studs, post-installed bar options, and the alternative interface equation.
 - Development length, anchorage, splice, congestion, and full detailing compliance.
 - Torsion and strut-and-tie modelling.
+
+
+## v20 update
+
+See `docs/patch_notes_v20.md` for the zone-definition/assignment editor, span + cantilever overhang system, hidden auto-design controls, and elevation utilization band.

@@ -509,8 +509,8 @@ code {
 }
 
 .graphics-layout {
-  grid-template-columns: minmax(660px, 1fr) minmax(450px, 500px);
-  align-items: stretch;
+  grid-template-columns: 1fr;
+  align-items: start;
 }
 
 #beamElevation svg {
@@ -547,6 +547,11 @@ code {
   align-items: start;
 }
 
+.section-wrap {
+  max-width: 560px;
+  justify-self: start;
+}
+
 .aligned-diagram-note {
   color: var(--muted);
 }
@@ -560,55 +565,62 @@ code {
 
 .beam-slider-overlay {
   position: absolute;
-  height: 32px;
   display: flex;
-  align-items: center;
+  align-items: stretch;
   z-index: 4;
-  padding: 4px 2px;
+  padding: 0;
 }
 
 .beam-slider-overlay input[type=range] {
   width: 100%;
+  height: 100%;
   padding: 0;
   margin: 0;
   background: transparent;
+  opacity: 0;
+  cursor: ew-resize;
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+.beam-slider-overlay input[type=range]:focus-visible {
+  opacity: 0.04;
+  outline: 2px dashed var(--danger);
+  outline-offset: 2px;
 }
 
 .beam-slider-overlay input[type=range]::-webkit-slider-runnable-track {
-  height: 8px;
-  background: rgba(31, 111, 235, 0.18);
-  border-radius: 999px;
+  height: 100%;
+  background: transparent;
+  border: 0;
 }
 
 .beam-slider-overlay input[type=range]::-webkit-slider-thumb {
   -webkit-appearance: none;
   appearance: none;
-  margin-top: -4px;
-  width: 16px;
-  height: 16px;
-  border-radius: 50%;
-  background: var(--accent);
-  border: 2px solid #fff;
-  box-shadow: 0 1px 6px rgba(18,32,47,0.22);
+  width: 1px;
+  height: 100%;
+  background: transparent;
+  border: 0;
+  box-shadow: none;
 }
 
 .beam-slider-overlay input[type=range]::-moz-range-track {
-  height: 8px;
-  background: rgba(31, 111, 235, 0.18);
-  border-radius: 999px;
+  height: 100%;
+  background: transparent;
+  border: 0;
 }
 
 .beam-slider-overlay input[type=range]::-moz-range-thumb {
-  width: 16px;
-  height: 16px;
-  border-radius: 50%;
-  background: var(--accent);
-  border: 2px solid #fff;
-  box-shadow: 0 1px 6px rgba(18,32,47,0.22);
+  width: 1px;
+  height: 100%;
+  background: transparent;
+  border: 0;
+  box-shadow: none;
 }
 
 #beamElevation svg {
-  max-height: 660px;
+  max-height: 880px;
 }
 
 #crossSection {
@@ -627,7 +639,7 @@ code {
 }
 
 @media (max-width: 900px) {
-  .beam-slider-overlay { position: static; width: 100% !important; left: auto !important; top: auto !important; margin: 10px 0 6px; }
+  .beam-slider-overlay { position: static; width: 100% !important; height: 44px !important; left: auto !important; top: auto !important; margin: 10px 0 6px; opacity: 0.25; }
 }
 
 /* v10 calculation report */
@@ -816,11 +828,11 @@ label[hidden] {
 }
 
 .beam-slider-overlay input[type=range] {
-  cursor: grab;
+  cursor: ew-resize;
 }
 
 .beam-slider-overlay input[type=range]:active {
-  cursor: grabbing;
+  cursor: ew-resize;
 }
 
 /* v12 zone schedule refinements */
@@ -1166,4 +1178,65 @@ label[hidden] {
   border-radius: 999px;
   padding: 0.08rem 0.45rem;
   white-space: nowrap;
+}
+
+/* v19 final elevation layout override */
+.graphics-layout { grid-template-columns: 1fr; align-items: start; }
+.section-wrap { max-width: 560px; justify-self: start; }
+#beamElevation svg { width: 100%; max-height: 880px; }
+
+/* v20: separate zone definitions from assignments and keep auto-design options hidden until requested */
+.auto-design-grid {
+  grid-template-columns: 1fr;
+  gap: 9px;
+}
+
+.auto-design-grid label {
+  grid-template-columns: minmax(170px, 1fr) minmax(190px, 220px);
+  align-items: center;
+}
+
+.zone-editor-section {
+  display: grid;
+  gap: 9px;
+  border: 1px solid #dbe6f1;
+  border-radius: 16px;
+  background: #f8fbff;
+  padding: 10px;
+}
+
+.zone-editor-section + .zone-editor-section {
+  margin-top: 12px;
+}
+
+.zone-editor-subhead {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+
+.zone-editor-subhead h4 {
+  margin: 0;
+  font-size: 0.86rem;
+  color: #132f4c;
+}
+
+.zone-editor-help {
+  margin-top: -3px;
+}
+
+.zone-definition-card {
+  border-left: 4px solid #1f6feb;
+}
+
+.zone-assignment-card {
+  border-left: 4px solid #b26a00;
+}
+
+@media (max-width: 760px) {
+  .auto-design-grid label,
+  .zone-card-grid label {
+    grid-template-columns: 1fr;
+  }
 }

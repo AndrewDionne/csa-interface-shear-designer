@@ -35,7 +35,9 @@ jobs:
               r"(?:runs-on:\s*|^\s*-\s*)(ubuntu-latest|windows-latest|macos-(?:latest|\d+))\s*$",
               re.MULTILINE,
           )
-          cache = re.compile(r"actions/cache@|^\s+cache:\s*", re.MULTILINE)
+          cache = re.compile(
+              r"actions/" + r"cache@" + r"|^\s+cache:\s*", re.MULTILINE
+          )
           failures = []
           workflows = sorted((*workflow_root.glob("*.yml"), *workflow_root.glob("*.yaml")))
 

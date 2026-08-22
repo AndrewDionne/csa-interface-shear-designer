@@ -4,5 +4,126 @@
     "docs": [
       "docs"
     ]
+  },
+  "preintegration": {
+    "enabled": true,
+    "continue_on_failure": true,
+    "certification_read_only": true,
+    "patch_preferences": [
+      "*CONSOLIDATED*.patch",
+      "*INTEGRATION*.patch",
+      "*.patch",
+      "*.diff"
+    ],
+    "max_patch_mb": 25,
+    "authoring_sequence": [
+      "Apply the complete static-app change to the exact declared baseline.",
+      "Keep index.html, app.js, styles.css, and the calculation documentation aligned.",
+      "Run source check, preparation, and full certification before guarded integration."
+    ],
+    "gate_policy_notes": [
+      "JavaScript syntax, required browser assets, and document wiring are blocking.",
+      "There is no package installation or compilation step for this static application.",
+      "Engineering correctness and browser rendering require explicit physical review in addition to automated checks."
+    ],
+    "source_checks": [
+      {
+        "name": "JavaScript syntax",
+        "id": "source-javascript",
+        "argv": [
+          "node",
+          "--check",
+          "app.js"
+        ],
+        "expectation": "The browser application JavaScript parses successfully."
+      },
+      {
+        "name": "Static application wiring",
+        "id": "source-static-wiring",
+        "argv": [
+          "python3",
+          "-c",
+          "from pathlib import Path; h=Path('index.html').read_text(); assert 'app.js' in h and 'styles.css' in h; assert Path('app.js').stat().st_size > 0 and Path('styles.css').stat().st_size > 0"
+        ],
+        "expectation": "The HTML references the non-empty JavaScript and stylesheet assets."
+      },
+      {
+        "name": "Engineering documentation presence",
+        "id": "source-engineering-docs",
+        "argv": [
+          "python3",
+          "-c",
+          "from pathlib import Path; required=['README.md','docs/methodology.md','docs/validation.md']; missing=[p for p in required if not Path(p).is_file() or not Path(p).read_text().strip()]; assert not missing, missing"
+        ],
+        "expectation": "Methodology and validation documentation remain present and non-empty."
+      }
+    ],
+    "blocker_discovery_checks": [
+      {
+        "name": "Complete static syntax discovery",
+        "id": "source-complete-javascript",
+        "argv": [
+          "node",
+          "--check",
+          "app.js"
+        ]
+      },
+      {
+        "name": "Complete static contract discovery",
+        "id": "source-complete-contract",
+        "argv": [
+          "python3",
+          "-c",
+          "from pathlib import Path; h=Path('index.html').read_text(); required=['app.js','styles.css','README.md','docs/methodology.md','docs/validation.md']; missing=[p for p in required if not Path(p).is_file() or not Path(p).read_text().strip()]; assert not missing, missing; assert all(name in h for name in ('app.js','styles.css'))"
+        ]
+      }
+    ],
+    "prepare_checks": [
+      {
+        "name": "Prepared JavaScript syntax",
+        "id": "prepare-javascript",
+        "argv": [
+          "node",
+          "--check",
+          "app.js"
+        ]
+      }
+    ],
+    "headroom_checks": [
+      {
+        "name": "Prepared static application contract",
+        "id": "prepare-static-contract",
+        "argv": [
+          "python3",
+          "-c",
+          "from pathlib import Path; h=Path('index.html').read_text(); required=['app.js','styles.css','README.md','docs/methodology.md','docs/validation.md']; missing=[p for p in required if not Path(p).is_file() or not Path(p).read_text().strip()]; assert not missing, missing; assert all(name in h for name in ('app.js','styles.css'))"
+        ]
+      }
+    ],
+    "full_checks": [
+      {
+        "name": "Certification JavaScript syntax",
+        "id": "full-javascript",
+        "argv": [
+          "node",
+          "--check",
+          "app.js"
+        ]
+      },
+      {
+        "name": "Certification static application contract",
+        "id": "full-static-contract",
+        "argv": [
+          "python3",
+          "-c",
+          "from pathlib import Path; h=Path('index.html').read_text(); required=['app.js','styles.css','README.md','docs/methodology.md','docs/validation.md']; missing=[p for p in required if not Path(p).is_file() or not Path(p).read_text().strip()]; assert not missing, missing; assert all(name in h for name in ('app.js','styles.css'))"
+        ]
+      }
+    ],
+    "physical_checks": [
+      "Open index.html in a supported desktop and mobile browser and exercise all analysis configurations.",
+      "Review diagrams, calculation sets, print output, and responsive layout.",
+      "Independently verify representative CSA calculations and design assumptions before engineering use."
+    ]
   }
 }

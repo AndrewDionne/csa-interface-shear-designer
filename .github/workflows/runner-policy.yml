@@ -1,0 +1,17 @@
+name: Mac runner policy
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  runner-policy:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    uses: AndrewDionne/reposnapshot/.github/workflows/mac-runner-policy.yml@b917e66f23db986f0f1dcd46aeadf0335d6779a0
+    with:
+      runner_label: csa-shear-macos

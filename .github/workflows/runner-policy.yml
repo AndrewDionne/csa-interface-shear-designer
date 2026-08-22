@@ -12,6 +12,50 @@ permissions:
 jobs:
   runner-policy:
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
-    uses: AndrewDionne/reposnapshot/.github/workflows/mac-runner-policy.yml@b917e66f23db986f0f1dcd46aeadf0335d6779a0
-    with:
-      runner_label: csa-shear-macos
+    runs-on:
+      - self-hosted
+      - macOS
+      - ARM64
+      - csa-shear-macos
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Reject hosted development runners and caches
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import re
+          from pathlib import Path
+
+          workflow_root = Path(".github/workflows")
+          hosted = re.compile(
+              r"(?:runs-on:\s*|^\s*-\s*)(ubuntu-latest|windows-latest|macos-(?:latest|\d+))\s*$",
+              re.MULTILINE,
+          )
+          cache = re.compile(r"actions/cache@|^\s+cache:\s*", re.MULTILINE)
+          failures = []
+          workflows = sorted((*workflow_root.glob("*.yml"), *workflow_root.glob("*.yaml")))
+
+          for path in workflows:
+              source = path.read_text(encoding="utf-8")
+              matches = hosted.findall(source)
+              if matches:
+                  failures.append(
+                      f"{path}: hosted runner label(s) are not allowed for development: "
+                      + ", ".join(sorted(set(matches)))
+                  )
+              if cache.search(source):
+                  failures.append(
+                      f"{path}: GitHub-hosted dependency caches are disabled on the free-tier baseline"
+                  )
+
+          if failures:
+              for failure in failures:
+                  print(f"ERROR: {failure}")
+              raise SystemExit(1)
+
+          print(f"Trusted Mac runner policy: OK ({len(workflows)} workflows)")
+          PY

@@ -23,18 +23,65 @@ concurrency:
 
 jobs:
   runner-policy:
-    uses: AndrewDionne/reposnapshot/.github/workflows/mac-runner-policy.yml@435fb64f660104f3f4372cc8fcb0e97eed028ea5
-    with:
-      runner_label: csa-shear-macos
+    uses: ./.github/workflows/runner-policy.yml
 
   verify:
     needs: runner-policy
-    permissions:
-      contents: read
-    uses: AndrewDionne/reposnapshot/.github/workflows/verify-patch.yml@435fb64f660104f3f4372cc8fcb0e97eed028ea5
-    with:
-      baseline_sha: ${{ inputs.baseline_sha }}
-      candidate_sha: ${{ inputs.candidate_sha }}
-      runner_label: csa-shear-macos
-      upload_evidence: false
-      timeout_minutes: 90
+    runs-on:
+      - self-hosted
+      - macOS
+      - ARM64
+      - csa-shear-macos
+    timeout-minutes: 90
+    env:
+      BASELINE_SHA: ${{ inputs.baseline_sha }}
+      CANDIDATE_SHA: ${{ inputs.candidate_sha }}
+    steps:
+      - name: Validate immutable commit inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$BASELINE_SHA" =~ ^[a-f0-9]{40}$ ]]
+          [[ "$CANDIDATE_SHA" =~ ^[a-f0-9]{40}$ ]]
+
+      - name: Check out exact candidate
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.candidate_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+          clean: true
+
+      - name: Verify exact candidate lineage
+        shell: bash
+        run: |
+          set -euo pipefail
+          git rev-parse --verify "${BASELINE_SHA}^{commit}" >/dev/null
+          test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
+          git merge-base --is-ancestor "$BASELINE_SHA" "$CANDIDATE_SHA"
+
+      - name: Validate JavaScript syntax
+        run: node --check app.js
+
+      - name: Validate static application wiring and documentation
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          html = Path("index.html").read_text(encoding="utf-8")
+          required = [
+              "app.js",
+              "styles.css",
+              "README.md",
+              "docs/methodology.md",
+              "docs/validation.md",
+          ]
+          missing = [
+              path
+              for path in required
+              if not Path(path).is_file() or not Path(path).read_text(encoding="utf-8").strip()
+          ]
+          assert not missing, missing
+          assert "app.js" in html and "styles.css" in html
+          PY

@@ -1,0 +1,40 @@
+name: Author validation
+
+run-name: Validate ${{ inputs.candidate_sha }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      baseline_sha:
+        description: Full lowercase SHA of the reviewed baseline commit
+        required: true
+        type: string
+      candidate_sha:
+        description: Full lowercase SHA of the candidate commit
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: author-validation-${{ github.repository }}
+  cancel-in-progress: true
+
+jobs:
+  runner-policy:
+    uses: AndrewDionne/reposnapshot/.github/workflows/mac-runner-policy.yml@435fb64f660104f3f4372cc8fcb0e97eed028ea5
+    with:
+      runner_label: csa-shear-macos
+
+  verify:
+    needs: runner-policy
+    permissions:
+      contents: read
+    uses: AndrewDionne/reposnapshot/.github/workflows/verify-patch.yml@435fb64f660104f3f4372cc8fcb0e97eed028ea5
+    with:
+      baseline_sha: ${{ inputs.baseline_sha }}
+      candidate_sha: ${{ inputs.candidate_sha }}
+      runner_label: csa-shear-macos
+      upload_evidence: false
+      timeout_minutes: 90

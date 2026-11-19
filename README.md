@@ -151,3 +151,7 @@ See `docs/patch_notes_v20.md` for the zone-definition/assignment editor, span + 
 - Updated the cross-section graphic to show bottom and top longitudinal steel in the selected number of rows.
 - Revised Calculation Set 2 to show the compression-block calculation used to obtain a single reported cracked-force-flow lever arm `z`.
 - Revised Calculation Set 8 so the interface steel check is written in the requested sequence: required interface steel, unused stirrup balance, additional dowel requirement, dowel provided, then final required-versus-available result.
+
+## Development verification cadence
+
+Publish coherent calculation/UI checkpoints and run the affected tests during development. Inspect [Author validation](.github/workflows/author-validation.yml) for its actual candidate inputs and required checks, then evaluate the completed batch for integration. [Runner policy](.github/workflows/runner-policy.yml) supplies the separate host-policy result. Keep engineering assumptions, standards-edition scope and physical/visual acceptance explicit. [Shared cadence guidance](https://github.com/AndrewDionne/reposnapshot/blob/main/CHAT_AI_WORKFLOW.md#size-development-batches-for-certification) explains the batching procedure.
